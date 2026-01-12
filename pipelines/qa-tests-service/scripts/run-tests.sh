@@ -4,8 +4,8 @@ set -e
 # Usage: ./scripts/run-tests.sh <TEST_ENV> <TEST_GROUP>
 # Example: ./scripts/run-tests.sh test smoke
 
-TEST_ENV="${1:-$TEST_ENV}"
-TEST_GROUP="${2:-$TEST_GROUP}"
+export TEST_ENV="${1:-$TEST_ENV}"
+export TEST_GROUP="${2:-$TEST_GROUP}"
 
 if [ -z "$TEST_ENV" ] || [ -z "$TEST_GROUP" ]; then
   echo "Error: TEST_ENV and TEST_GROUP are required"
@@ -35,5 +35,5 @@ echo "Installing dependencies..."
 npm ci || npm install
 
 # Run tests
-echo "Running: npm run browserstack:${TEST_ENV}:${TEST_GROUP}"
-npm run "browserstack:${TEST_ENV}:${TEST_GROUP}"
+echo "Running: npm run browserstack (TEST_ENV=$TEST_ENV, TEST_GROUP=$TEST_GROUP)"
+npm run browserstack
