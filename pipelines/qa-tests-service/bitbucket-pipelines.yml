@@ -1,8 +1,4 @@
 definitions:
-  caches:
-    npm: ~/.npm
-    node-modules: node_modules
-
   steps:
     - step: &run-tests
         name: Run Playwright Tests
@@ -10,9 +6,6 @@ definitions:
           - self.hosted
           - linux.shell
           - qa.test.22
-        caches:
-          - npm
-          - node-modules
         script:
           - chmod +x ./scripts/run-tests.sh
           - ./scripts/run-tests.sh "$TEST_ENV" "$TEST_GROUP"
