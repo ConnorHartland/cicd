@@ -1,0 +1,97 @@
+definitions:
+  caches:
+    npm: ~/.npm
+    node-modules: node_modules
+
+  steps:
+    - step: &run-tests
+        name: Run Playwright Tests
+        runs-on:
+          - self.hosted
+          - linux.shell
+          - qa.test.22
+        caches:
+          - npm
+          - node-modules
+        script:
+          - chmod +x ./scripts/run-tests.sh
+          - ./scripts/run-tests.sh "$TEST_ENV" "$TEST_GROUP"
+        after-script:
+          - rm -f ./.env-cmdrc.json
+        artifacts:
+          - playwright-report/**
+          - test-results/**
+
+pipelines:
+  branches:
+    develop:
+      - step:
+          <<: *run-tests
+          name: Smoke Tests (develop)
+          script:
+            - chmod +x ./scripts/run-tests.sh
+            - ./scripts/run-tests.sh test smoke
+
+    test:
+      - step:
+          <<: *run-tests
+          name: Smoke Tests (test)
+          script:
+            - chmod +x ./scripts/run-tests.sh
+            - ./scripts/run-tests.sh test smoke
+
+    qa:
+      - step:
+          <<: *run-tests
+          name: Regression Tests (qa)
+          script:
+            - chmod +x ./scripts/run-tests.sh
+            - ./scripts/run-tests.sh qa regression
+
+  custom:
+    run-tests:
+      - variables:
+          - name: TEST_ENV
+            default: 'test'
+            allowed-values:
+              - 'test'
+              - 'qa'
+              - 'prod'
+          - name: TEST_GROUP
+            default: 'smoke'
+            allowed-values:
+              - 'smoke'
+              - 'regression'
+      - step: *run-tests
+
+    smoke-test:
+      - variables:
+          - name: TEST_ENV
+            value: 'test'
+          - name: TEST_GROUP
+            value: 'smoke'
+      - step: *run-tests
+
+    smoke-qa:
+      - variables:
+          - name: TEST_ENV
+            value: 'qa'
+          - name: TEST_GROUP
+            value: 'smoke'
+      - step: *run-tests
+
+    regression-qa:
+      - variables:
+          - name: TEST_ENV
+            value: 'qa'
+          - name: TEST_GROUP
+            value: 'regression'
+      - step: *run-tests
+
+    regression-prod:
+      - variables:
+          - name: TEST_ENV
+            value: 'prod'
+          - name: TEST_GROUP
+            value: 'regression'
+      - step: *run-tests
