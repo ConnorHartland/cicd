@@ -1,0 +1,25 @@
+app_name            = "my-app"
+aws_region          = "us-east-1"
+ecr_repository_name = "my-app"
+
+ecs_cluster_arns = {
+  dev     = "arn:aws:ecs:us-east-1:123456789012:cluster/dev-cluster"
+  test    = "arn:aws:ecs:us-east-1:123456789012:cluster/test-cluster"
+  staging = "arn:aws:ecs:us-east-1:123456789012:cluster/staging-cluster"
+  prod    = "arn:aws:ecs:us-east-1:123456789012:cluster/prod-cluster"
+}
+
+ecs_service_names = {
+  dev     = "my-app-dev"
+  test    = "my-app-test"
+  staging = "my-app-staging"
+  prod    = "my-app-prod"
+}
+
+approval_sns_topic_arn = "arn:aws:sns:us-east-1:123456789012:deployment-approvals"
+
+tags = {
+  Project     = "my-app"
+  Environment = "shared"
+  ManagedBy   = "terraform"
+}

@@ -1,0 +1,158 @@
+definitions:
+  steps:
+    - step: &build
+        name: Build Application
+        image: node:20
+        caches:
+          - node
+        script:
+          - npm ci
+          - npm run build
+          - tar -czf artifact.tar.gz dist scripts appspec.yml package.json package-lock.json
+        artifacts:
+          - artifact.tar.gz
+
+    - step: &deploy
+        name: Deploy to $ENVIRONMENT
+        image: atlassian/pipelines-awscli:latest
+        script:
+          - |
+            echo "Deploying to $ENVIRONMENT"
+
+            # Upload artifact to S3
+            REVISION_KEY="releases/${BITBUCKET_COMMIT:0:7}/artifact.tar.gz"
+            aws s3 cp artifact.tar.gz "s3://${DEPLOY_BUCKET}/${REVISION_KEY}"
+
+            # Create deployment
+            DEPLOYMENT_ID=$(aws deploy create-deployment \
+              --application-name "$APPLICATION_NAME" \
+              --deployment-group-name "$ENVIRONMENT" \
+              --s3-location bucket=${DEPLOY_BUCKET},key=${REVISION_KEY},bundleType=tgz \
+              --query 'deploymentId' --output text)
+
+            echo "Deployment ID: $DEPLOYMENT_ID"
+
+            # Wait for deployment to complete
+            echo "Waiting for deployment to complete..."
+            aws deploy wait deployment-successful --deployment-id "$DEPLOYMENT_ID"
+
+            echo "Deployment successful!"
+
+pipelines:
+  branches:
+    main:
+      - step: *build
+      - step:
+          <<: *deploy
+          name: Deploy to Dev
+          deployment: dev
+          script:
+            - export ENVIRONMENT=dev
+            - export APPLICATION_NAME=my-app
+            - export DEPLOY_BUCKET=my-deploy-bucket
+            - |
+              REVISION_KEY="releases/${BITBUCKET_COMMIT:0:7}/artifact.tar.gz"
+              aws s3 cp artifact.tar.gz "s3://${DEPLOY_BUCKET}/${REVISION_KEY}"
+
+              DEPLOYMENT_ID=$(aws deploy create-deployment \
+                --application-name "$APPLICATION_NAME" \
+                --deployment-group-name "$ENVIRONMENT" \
+                --s3-location bucket=${DEPLOY_BUCKET},key=${REVISION_KEY},bundleType=tgz \
+                --query 'deploymentId' --output text)
+
+              echo "Deployment ID: $DEPLOYMENT_ID"
+              aws deploy wait deployment-successful --deployment-id "$DEPLOYMENT_ID"
+              echo "Deployment to $ENVIRONMENT successful!"
+
+  custom:
+    promote-to-test:
+      - variables:
+          - name: COMMIT_SHA
+            description: "Git commit SHA to deploy (short or full)"
+      - step:
+          name: Deploy to Test
+          deployment: test
+          image: atlassian/pipelines-awscli:latest
+          script:
+            - export ENVIRONMENT=test
+            - export APPLICATION_NAME=my-app
+            - export DEPLOY_BUCKET=my-deploy-bucket
+            - |
+              # Use the same artifact from the build
+              REVISION_KEY="releases/${COMMIT_SHA:0:7}/artifact.tar.gz"
+
+              # Verify artifact exists
+              aws s3 ls "s3://${DEPLOY_BUCKET}/${REVISION_KEY}" || {
+                echo "ERROR: Artifact not found for commit $COMMIT_SHA"
+                exit 1
+              }
+
+              DEPLOYMENT_ID=$(aws deploy create-deployment \
+                --application-name "$APPLICATION_NAME" \
+                --deployment-group-name "$ENVIRONMENT" \
+                --s3-location bucket=${DEPLOY_BUCKET},key=${REVISION_KEY},bundleType=tgz \
+                --query 'deploymentId' --output text)
+
+              echo "Deployment ID: $DEPLOYMENT_ID"
+              aws deploy wait deployment-successful --deployment-id "$DEPLOYMENT_ID"
+              echo "Deployment to $ENVIRONMENT successful!"
+
+    promote-to-staging:
+      - variables:
+          - name: COMMIT_SHA
+            description: "Git commit SHA to deploy (short or full)"
+      - step:
+          name: Deploy to Staging
+          deployment: staging
+          image: atlassian/pipelines-awscli:latest
+          script:
+            - export ENVIRONMENT=staging
+            - export APPLICATION_NAME=my-app
+            - export DEPLOY_BUCKET=my-deploy-bucket
+            - |
+              REVISION_KEY="releases/${COMMIT_SHA:0:7}/artifact.tar.gz"
+
+              aws s3 ls "s3://${DEPLOY_BUCKET}/${REVISION_KEY}" || {
+                echo "ERROR: Artifact not found for commit $COMMIT_SHA"
+                exit 1
+              }
+
+              DEPLOYMENT_ID=$(aws deploy create-deployment \
+                --application-name "$APPLICATION_NAME" \
+                --deployment-group-name "$ENVIRONMENT" \
+                --s3-location bucket=${DEPLOY_BUCKET},key=${REVISION_KEY},bundleType=tgz \
+                --query 'deploymentId' --output text)
+
+              echo "Deployment ID: $DEPLOYMENT_ID"
+              aws deploy wait deployment-successful --deployment-id "$DEPLOYMENT_ID"
+              echo "Deployment to $ENVIRONMENT successful!"
+
+    promote-to-prod:
+      - variables:
+          - name: COMMIT_SHA
+            description: "Git commit SHA to deploy (short or full)"
+      - step:
+          name: Deploy to Production
+          deployment: production
+          image: atlassian/pipelines-awscli:latest
+          script:
+            - export ENVIRONMENT=prod
+            - export APPLICATION_NAME=my-app
+            - export DEPLOY_BUCKET=my-deploy-bucket
+            - |
+              REVISION_KEY="releases/${COMMIT_SHA:0:7}/artifact.tar.gz"
+
+              aws s3 ls "s3://${DEPLOY_BUCKET}/${REVISION_KEY}" || {
+                echo "ERROR: Artifact not found for commit $COMMIT_SHA"
+                exit 1
+              }
+
+              DEPLOYMENT_ID=$(aws deploy create-deployment \
+                --application-name "$APPLICATION_NAME" \
+                --deployment-group-name "$ENVIRONMENT" \
+                --s3-location bucket=${DEPLOY_BUCKET},key=${REVISION_KEY},bundleType=tgz \
+                --query 'deploymentId' --output text)
+
+              echo "Deployment ID: $DEPLOYMENT_ID"
+              aws deploy wait deployment-successful --deployment-id "$DEPLOYMENT_ID"
+              echo "Deployment to $ENVIRONMENT successful!"

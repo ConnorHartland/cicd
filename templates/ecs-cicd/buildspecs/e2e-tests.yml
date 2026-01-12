@@ -1,0 +1,58 @@
+version: 0.2
+
+env:
+  variables:
+    NODE_ENV: test
+    PLAYWRIGHT_BROWSERS_PATH: /root/.cache/ms-playwright
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo "Installing dependencies..."
+      - npm ci
+      - npx playwright install chromium --with-deps
+
+  pre_build:
+    commands:
+      - echo "Waiting for service to be healthy..."
+      - |
+        MAX_RETRIES=30
+        RETRY_INTERVAL=10
+
+        for i in $(seq 1 $MAX_RETRIES); do
+          if curl -sf "$BASE_URL/health" > /dev/null 2>&1; then
+            echo "Service is healthy!"
+            break
+          fi
+          echo "Attempt $i/$MAX_RETRIES - Service not ready, waiting..."
+          sleep $RETRY_INTERVAL
+        done
+
+  build:
+    commands:
+      - echo "Running E2E tests against $BASE_URL..."
+      - npm run test:e2e
+
+  post_build:
+    commands:
+      - echo "E2E tests completed"
+
+reports:
+  e2e-tests:
+    files:
+      - 'results.xml'
+    base-directory: 'playwright-report'
+    file-format: JUNITXML
+
+artifacts:
+  files:
+    - 'playwright-report/**/*'
+    - 'test-results/**/*'
+  name: e2e-test-artifacts
+
+cache:
+  paths:
+    - 'node_modules/**/*'
+    - '/root/.cache/ms-playwright/**/*'

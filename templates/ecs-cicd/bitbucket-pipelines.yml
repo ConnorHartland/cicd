@@ -1,0 +1,77 @@
+image: node:20
+
+definitions:
+  services:
+    docker:
+      memory: 2048
+
+  steps:
+    - step: &test
+        name: Test
+        caches:
+          - node
+        script:
+          - npm ci
+          - npm run lint
+          - npm run test
+
+    - step: &build-and-push
+        name: Build and Push to ECR
+        image: atlassian/pipelines-awscli:latest
+        services:
+          - docker
+        script:
+          - |
+            echo "=== Building Docker image ==="
+            IMAGE_TAG="${BITBUCKET_COMMIT:0:7}"
+
+            # Login to ECR
+            aws ecr get-login-password --region $AWS_REGION \
+              | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+            # Build image
+            docker build \
+              --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+              --build-arg GIT_COMMIT=$BITBUCKET_COMMIT \
+              --build-arg GIT_BRANCH=$BITBUCKET_BRANCH \
+              -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
+              -t $ECR_REGISTRY/$ECR_REPO:latest \
+              .
+
+            # Push both tags
+            echo "=== Pushing to ECR ==="
+            docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+            docker push $ECR_REGISTRY/$ECR_REPO:latest
+
+            echo "=== Done ==="
+            echo "Image: $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG"
+
+pipelines:
+  pull-requests:
+    '**':
+      - step: *test
+
+  branches:
+    main:
+      - step: *test
+      - step: *build-and-push
+
+    develop:
+      - step: *test
+      - step:
+          <<: *build-and-push
+          name: Build and Push to ECR (dev)
+          script:
+            - |
+              IMAGE_TAG="${BITBUCKET_COMMIT:0:7}"
+
+              aws ecr get-login-password --region $AWS_REGION \
+                | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+              docker build \
+                -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG \
+                -t $ECR_REGISTRY/$ECR_REPO:dev \
+                .
+
+              docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+              docker push $ECR_REGISTRY/$ECR_REPO:dev

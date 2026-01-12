@@ -1,0 +1,50 @@
+version: 0.2
+
+env:
+  variables:
+    NODE_ENV: test
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo "Installing dependencies..."
+      - npm ci
+
+  pre_build:
+    commands:
+      - echo "Waiting for service to be healthy..."
+      - |
+        MAX_RETRIES=30
+        RETRY_INTERVAL=10
+        SERVICE_URL="${SERVICE_URL:-http://localhost:3000}"
+
+        for i in $(seq 1 $MAX_RETRIES); do
+          if curl -sf "$SERVICE_URL/health" > /dev/null 2>&1; then
+            echo "Service is healthy!"
+            break
+          fi
+          echo "Attempt $i/$MAX_RETRIES - Service not ready, waiting..."
+          sleep $RETRY_INTERVAL
+        done
+
+  build:
+    commands:
+      - echo "Running integration tests..."
+      - npm run test:integration
+
+  post_build:
+    commands:
+      - echo "Integration tests completed"
+
+reports:
+  integration-tests:
+    files:
+      - 'junit.xml'
+    base-directory: 'test-results'
+    file-format: JUNITXML
+
+cache:
+  paths:
+    - 'node_modules/**/*'
