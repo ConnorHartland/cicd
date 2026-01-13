@@ -1,0 +1,135 @@
+definitions:
+  steps:
+    - step: &build-and-test
+        name: Test and Build
+        script:
+          - npm ci
+          - npm run lint
+          - npm run test
+          - npm run build
+        runs-on:
+          - self.hosted
+          - linux.shell
+          - node22
+
+    - step: &predeploy-nonprod
+        name: Pre-deploy
+        script:
+          - npm ci
+          - npm run build
+          - zip -r build_${BITBUCKET_COMMIT}.zip dist node_modules
+          - ~/pipeline-utils/setup_kafka.sh
+          - ~/pipeline-utils/prisma_migration.sh $ENV_SUFFIX $SEED
+        artifacts:
+          - build*.zip
+        runs-on:
+          - self.hosted
+          - linux.shell
+          - node22
+
+    - step: &predeploy-prod
+        name: Pre-deploy
+        script:
+          - npm ci
+          - npm run build
+          - zip -r build_${BITBUCKET_COMMIT}.zip dist node_modules
+          - ~/pipeline-utils/setup_kafka.sh
+          - ~/pipeline-utils/prisma_migration.sh $ENV_SUFFIX
+        artifacts:
+          - build*.zip
+        runs-on:
+          - self.hosted
+          - linux.shell
+          - node22.prod
+
+    - step: &deploy
+        name: Deploy to AWS
+        image: amazon/aws-cli
+        script:
+          - |
+            export AWS_ACCESS_KEY_ID=$(eval echo \$AWS_ACCESS_KEY_ID_$AWS_SUFFIX)
+            export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
+          - /usr/local/bin/aws s3 rm s3://$S3_BUCKET --recursive --exclude "*.env"
+          - /usr/local/bin/aws s3 cp build_${BITBUCKET_COMMIT}.zip s3://$S3_BUCKET/build.zip
+          - /usr/local/bin/aws autoscaling start-instance-refresh --region us-east-1 --auto-scaling-group-name $ASG_NAME
+
+    - step: &tag-release
+        name: Tag Release
+        script:
+          - git tag -a "release-${BITBUCKET_COMMIT:0:7}" -m "Release from merge to main"
+          - git push origin "release-${BITBUCKET_COMMIT:0:7}"
+
+pipelines:
+  pull-requests:
+    "**":
+      - step: *build-and-test
+
+  branches:
+    feature/*:
+      - step: *build-and-test
+      - stage:
+          name: Deploy to Develop
+          deployment: Develop
+          steps:
+            - step: *predeploy-nonprod
+            - step: *deploy
+
+    release/*:
+      - step: *build-and-test
+      - stage:
+          name: Deploy to Test
+          deployment: Test
+          steps:
+            - step: *predeploy-nonprod
+            - step: *deploy
+      - stage:
+          name: Deploy to Staging
+          deployment: Staging
+          trigger: manual
+          steps:
+            - step: *predeploy-nonprod
+            - step: *deploy
+      - stage:
+          name: Deploy to Production
+          deployment: Production
+          trigger: manual
+          steps:
+            - step: *predeploy-prod
+            - step: *deploy
+
+    main:
+      - step: *tag-release
+
+  custom:
+    deploy-to-prod:
+      - stage:
+          name: Deploy to Production
+          deployment: Production
+          steps:
+            - step: *predeploy-prod
+            - step: *deploy
+
+    setup-kafka-nonprod:
+      - variables:
+          - name: ENV_SUFFIX
+            default: "dev"
+            allowed-values:
+              - "dev"
+              - "test"
+              - "qa"
+
+          - name: ALLOW_TOPIC_RECREATE
+            default: "false"
+            allowed-values:
+              - "true"
+              - "false"
+
+      - step:
+          name: Setup Kafka
+          script:
+            - npm ci
+            - ~/pipeline-utils/setup_kafka.sh
+          runs-on:
+            - self.hosted
+            - linux.shell
+            - node22
