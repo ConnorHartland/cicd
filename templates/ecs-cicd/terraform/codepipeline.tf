@@ -1,6 +1,12 @@
-# CodePipeline
-resource "aws_codepipeline" "main" {
-  name     = "${var.app_name}-pipeline"
+# =============================================================================
+# Release Pipeline (TEST → STAGING → PROD)
+# =============================================================================
+# Triggered by: ECR push with :rc-* tag (release candidates)
+# Blue/Green deployments via CodeDeploy
+# =============================================================================
+
+resource "aws_codepipeline" "release" {
+  name     = "${var.app_name}-release-pipeline"
   role_arn = aws_iam_role.codepipeline.arn
 
   artifact_store {
@@ -8,7 +14,9 @@ resource "aws_codepipeline" "main" {
     type     = "S3"
   }
 
-  # Stage 1: Source (ECR)
+  # ---------------------------------------------------------------------------
+  # Stage 1: Source (ECR - :rc-* tags only)
+  # ---------------------------------------------------------------------------
   stage {
     name = "Source"
 
@@ -22,34 +30,64 @@ resource "aws_codepipeline" "main" {
 
       configuration = {
         RepositoryName = var.ecr_repository_name
-        ImageTag       = "latest"
+        # Note: EventBridge filters for :rc-* tags, but ECR source needs a specific tag
+        # Use imageDetail.json from the event for dynamic tag
+        ImageTag = "latest" # Overridden by EventBridge event
       }
     }
   }
 
-  # Stage 2: Deploy to Dev (auto)
+  # ---------------------------------------------------------------------------
+  # Stage 2: Security Gate (ECR Scan Check)
+  # ---------------------------------------------------------------------------
   stage {
-    name = "Deploy-Dev"
+    name = "Security-Gate"
+
+    action {
+      name             = "CheckECRScan"
+      category         = "Build"
+      owner            = "AWS"
+      provider         = "CodeBuild"
+      input_artifacts  = ["source_output"]
+      output_artifacts = ["security_output"]
+      version          = "1"
+
+      configuration = {
+        ProjectName = aws_codebuild_project.security_gate.name
+      }
+    }
+  }
+
+  # ---------------------------------------------------------------------------
+  # Stage 3: Deploy to TEST (Blue/Green, auto)
+  # ---------------------------------------------------------------------------
+  stage {
+    name = "Deploy-Test"
 
     action {
       name            = "Deploy"
       category        = "Deploy"
       owner           = "AWS"
-      provider        = "ECS"
+      provider        = "CodeDeployToECS"
       input_artifacts = ["source_output"]
       version         = "1"
 
       configuration = {
-        ClusterName = var.ecs_cluster_arns["dev"]
-        ServiceName = var.ecs_service_names["dev"]
-        FileName    = "imagedefinitions.json"
+        ApplicationName                = aws_codedeploy_app.main.name
+        DeploymentGroupName            = aws_codedeploy_deployment_group.test.deployment_group_name
+        TaskDefinitionTemplateArtifact = "source_output"
+        TaskDefinitionTemplatePath     = "taskdef.json"
+        AppSpecTemplateArtifact        = "source_output"
+        AppSpecTemplatePath            = "appspec.yaml"
       }
     }
   }
 
-  # Stage 3: Integration Tests
+  # ---------------------------------------------------------------------------
+  # Stage 4: Integration Tests
+  # ---------------------------------------------------------------------------
   stage {
-    name = "Test-Dev"
+    name = "Test-Integration"
 
     action {
       name             = "IntegrationTests"
@@ -64,8 +102,8 @@ resource "aws_codepipeline" "main" {
         ProjectName = aws_codebuild_project.integration_tests.name
         EnvironmentVariables = jsonencode([
           {
-            name  = "SERVICE_URL"
-            value = "https://dev.example.com"
+            name  = "TARGET_URL"
+            value = var.test_environment_url
             type  = "PLAINTEXT"
           }
         ])
@@ -73,9 +111,11 @@ resource "aws_codepipeline" "main" {
     }
   }
 
-  # Stage 4: Approval for Test
+  # ---------------------------------------------------------------------------
+  # Stage 5: Approval for STAGING
+  # ---------------------------------------------------------------------------
   stage {
-    name = "Approval-Test"
+    name = "Approval-Staging"
 
     action {
       name     = "Approval"
@@ -86,32 +126,39 @@ resource "aws_codepipeline" "main" {
 
       configuration = {
         NotificationArn = var.approval_sns_topic_arn
-        CustomData      = "Please review and approve deployment to TEST environment"
+        CustomData      = "Tests passed in TEST. Approve deployment to STAGING?"
       }
     }
   }
 
-  # Stage 5: Deploy to Test
+  # ---------------------------------------------------------------------------
+  # Stage 6: Deploy to STAGING (Blue/Green)
+  # ---------------------------------------------------------------------------
   stage {
-    name = "Deploy-Test"
+    name = "Deploy-Staging"
 
     action {
       name            = "Deploy"
       category        = "Deploy"
       owner           = "AWS"
-      provider        = "ECS"
+      provider        = "CodeDeployToECS"
       input_artifacts = ["source_output"]
       version         = "1"
 
       configuration = {
-        ClusterName = var.ecs_cluster_arns["test"]
-        ServiceName = var.ecs_service_names["test"]
-        FileName    = "imagedefinitions.json"
+        ApplicationName                = aws_codedeploy_app.main.name
+        DeploymentGroupName            = aws_codedeploy_deployment_group.staging.deployment_group_name
+        TaskDefinitionTemplateArtifact = "source_output"
+        TaskDefinitionTemplatePath     = "taskdef.json"
+        AppSpecTemplateArtifact        = "source_output"
+        AppSpecTemplatePath            = "appspec.yaml"
       }
     }
   }
 
-  # Stage 6: E2E Tests
+  # ---------------------------------------------------------------------------
+  # Stage 7: E2E Tests
+  # ---------------------------------------------------------------------------
   stage {
     name = "Test-E2E"
 
@@ -129,7 +176,7 @@ resource "aws_codepipeline" "main" {
         EnvironmentVariables = jsonencode([
           {
             name  = "BASE_URL"
-            value = "https://test.example.com"
+            value = var.staging_environment_url
             type  = "PLAINTEXT"
           }
         ])
@@ -137,45 +184,9 @@ resource "aws_codepipeline" "main" {
     }
   }
 
-  # Stage 7: Approval for Staging
-  stage {
-    name = "Approval-Staging"
-
-    action {
-      name     = "Approval"
-      category = "Approval"
-      owner    = "AWS"
-      provider = "Manual"
-      version  = "1"
-
-      configuration = {
-        NotificationArn = var.approval_sns_topic_arn
-        CustomData      = "Please review and approve deployment to STAGING environment"
-      }
-    }
-  }
-
-  # Stage 8: Deploy to Staging
-  stage {
-    name = "Deploy-Staging"
-
-    action {
-      name            = "Deploy"
-      category        = "Deploy"
-      owner           = "AWS"
-      provider        = "ECS"
-      input_artifacts = ["source_output"]
-      version         = "1"
-
-      configuration = {
-        ClusterName = var.ecs_cluster_arns["staging"]
-        ServiceName = var.ecs_service_names["staging"]
-        FileName    = "imagedefinitions.json"
-      }
-    }
-  }
-
-  # Stage 9: Approval for Prod (restricted)
+  # ---------------------------------------------------------------------------
+  # Stage 8: Approval for PROD (Restricted)
+  # ---------------------------------------------------------------------------
   stage {
     name = "Approval-Prod"
 
@@ -188,12 +199,14 @@ resource "aws_codepipeline" "main" {
 
       configuration = {
         NotificationArn = var.approval_sns_topic_arn
-        CustomData      = "PRODUCTION DEPLOYMENT - Requires release-manager approval"
+        CustomData      = "PRODUCTION DEPLOYMENT - E2E tests passed. Approve deployment to PROD?"
       }
     }
   }
 
-  # Stage 10: Deploy to Prod
+  # ---------------------------------------------------------------------------
+  # Stage 9: Deploy to PROD (Blue/Green with linear rollout)
+  # ---------------------------------------------------------------------------
   stage {
     name = "Deploy-Prod"
 
@@ -201,14 +214,17 @@ resource "aws_codepipeline" "main" {
       name            = "Deploy"
       category        = "Deploy"
       owner           = "AWS"
-      provider        = "ECS"
+      provider        = "CodeDeployToECS"
       input_artifacts = ["source_output"]
       version         = "1"
 
       configuration = {
-        ClusterName = var.ecs_cluster_arns["prod"]
-        ServiceName = var.ecs_service_names["prod"]
-        FileName    = "imagedefinitions.json"
+        ApplicationName                = aws_codedeploy_app.main.name
+        DeploymentGroupName            = aws_codedeploy_deployment_group.prod.deployment_group_name
+        TaskDefinitionTemplateArtifact = "source_output"
+        TaskDefinitionTemplatePath     = "taskdef.json"
+        AppSpecTemplateArtifact        = "source_output"
+        AppSpecTemplatePath            = "appspec.yaml"
       }
     }
   }
