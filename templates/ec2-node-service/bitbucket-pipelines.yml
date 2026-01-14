@@ -1,6 +1,6 @@
 definitions:
   steps:
-    - step: &build-and-test
+    - step: &build
         name: Build & Test
         script:
           - npm ci --silent
@@ -8,17 +8,18 @@ definitions:
           - npm run test
           - npm run build
           - |
-            # Run SonarQube analysis with PR decoration
-            if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
-              SONAR_ARGS="-Dsonar.host.url=$SONAR_HOST_URL -Dsonar.token=$SONAR_TOKEN"
-              if [ -n "$BITBUCKET_PR_ID" ]; then
-                SONAR_ARGS="$SONAR_ARGS -Dsonar.pullrequest.key=$BITBUCKET_PR_ID"
-                SONAR_ARGS="$SONAR_ARGS -Dsonar.pullrequest.branch=$BITBUCKET_BRANCH"
-                SONAR_ARGS="$SONAR_ARGS -Dsonar.pullrequest.base=main"
+            # Run SonarQube + PR report only in PR context
+            if [ -n "$BITBUCKET_PR_ID" ]; then
+              if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
+                npx sonar-scanner \
+                  -Dsonar.host.url=$SONAR_HOST_URL \
+                  -Dsonar.token=$SONAR_TOKEN \
+                  -Dsonar.pullrequest.key=$BITBUCKET_PR_ID \
+                  -Dsonar.pullrequest.branch=$BITBUCKET_BRANCH \
+                  -Dsonar.pullrequest.base=main
               fi
-              npx sonar-scanner $SONAR_ARGS
+              ./scripts/pr_report.sh
             fi
-          - ./scripts/pr_report.sh
           - zip -rq build_${BITBUCKET_COMMIT}.zip dist node_modules package.json package-lock.json
         artifacts:
           - build*.zip
@@ -27,7 +28,7 @@ definitions:
           - linux.shell
           - node22
 
-    - step: &build-and-test-release
+    - step: &build-release
         name: Build & Test (Release)
         script:
           - npm ci --silent
@@ -118,11 +119,11 @@ pipelines:
   pull-requests:
     # All PRs get basic CI (including hotfix/*)
     "**":
-      - step: *build-and-test
+      - step: *build
 
     # PRs from release/* branches get full release pipeline
     "release/*":
-      - step: *build-and-test-release
+      - step: *build-release
       - stage:
           name: Deploy to Test
           deployment: Test
@@ -151,17 +152,9 @@ pipelines:
   # BRANCH PUSHES
   # ===================
   branches:
-    # Feature branches - CI + manual deploy to develop
+    # Feature branches - CI only (use deploy-to-develop custom pipeline to deploy)
     feature/*:
-      - step: *build-and-test
-      - stage:
-          name: Deploy to Develop
-          deployment: Develop
-          trigger: manual
-          steps:
-            - step: *predeploy-nonprod
-            - step: *deploy
-            - step: *verify-deploy
+      - step: *build
 
     # Main branch - tag release after PR merge
     main:
@@ -178,6 +171,7 @@ pipelines:
             allowed-values:
               - "true"
               - "false"
+      - step: *build
       - stage:
           name: Deploy to Develop
           deployment: Develop
@@ -193,6 +187,7 @@ pipelines:
             allowed-values:
               - "true"
               - "false"
+      - step: *build
       - stage:
           name: Deploy to Test
           deployment: Test
@@ -202,7 +197,7 @@ pipelines:
             - step: *verify-deploy
 
     deploy-hotfix:
-      - step: *build-and-test-release
+      - step: *build-release
       - stage:
           name: Deploy to Production
           deployment: Production
@@ -233,3 +228,32 @@ pipelines:
             - self.hosted
             - linux.shell
             - node22
+
+    docker-build:
+      - step:
+          name: Build & Push Docker Image
+          image: docker:24-dind
+          services:
+            - docker
+          script:
+            - |
+              # Generate tags
+              SHORT_SHA=${BITBUCKET_COMMIT:0:7}
+              BRANCH_TAG=$(echo "$BITBUCKET_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]')
+
+              echo "Building Docker image..."
+              echo "  Repository: ${DOCKER_REPO}"
+              echo "  Tags: ${SHORT_SHA}, ${BRANCH_TAG}"
+            - |
+              # Build the image
+              docker build -t ${DOCKER_REPO}:${BITBUCKET_COMMIT:0:7} \
+                           -t ${DOCKER_REPO}:$(echo "$BITBUCKET_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]') \
+                           .
+            - |
+              # Login to Docker Hub
+              echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
+            - |
+              # Push tags
+              docker push ${DOCKER_REPO}:${BITBUCKET_COMMIT:0:7}
+              docker push ${DOCKER_REPO}:$(echo "$BITBUCKET_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]')
+            - echo "Docker image pushed successfully"

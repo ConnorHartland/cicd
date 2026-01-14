@@ -7,8 +7,8 @@ Bitbucket Pipeline template for Node.js applications deploying to EC2 via S3 art
 ### Feature Development
 | Trigger | Stage | ENV_SUFFIX | Mode |
 |---------|-------|------------|------|
-| `feature/*` push | Build & Test | - | Auto |
-| `feature/*` push | Deploy to Develop | `dev` | Manual |
+| `feature/*` push | Build & Test (CI only) | - | Auto |
+| `deploy-to-develop` pipeline | Build & Deploy to Develop | `dev` | Manual |
 
 ### Release Process (PR from release/*)
 | Trigger | Stage | ENV_SUFFIX | Mode |
@@ -130,12 +130,31 @@ SonarQube analysis runs inline in the pipeline. Ensure your repo has a `sonar-pr
 5. Merging automatically creates version tag on main
 
 ### Custom Pipelines
-- **deploy-to-develop**: Manual deploy to dev (with seed option)
-- **deploy-to-test**: Manual deploy to test (with seed option)
+- **deploy-to-develop**: Build + deploy to dev (with seed option)
+- **deploy-to-test**: Build + deploy to test (with seed option)
 - **deploy-hotfix**: Build + deploy directly to prod (emergency only)
 - **setup-kafka**: Setup Kafka topics for an environment
+- **docker-build**: Build and push Docker image to Docker Hub
 
 **Note:** Staging and production deployments must go through the PR release cycle.
+
+### Docker Build Pipeline
+
+The `docker-build` custom pipeline builds and pushes Docker images to Docker Hub.
+
+**Tags generated:**
+- `{commit-sha}` - Short commit hash (e.g., `abc1234`)
+- `{branch-name}` - Sanitized branch name (e.g., `feature-my-feature`, `release-2.11.0`)
+
+**Required variables (Repository Settings → Repository variables):**
+- `DOCKER_USERNAME` - Docker Hub username
+- `DOCKER_TOKEN` - Docker Hub access token
+- `DOCKER_REPO` - Full repository name (e.g., `myorg/myservice`)
+
+**Usage:**
+1. Ensure your repo has a `Dockerfile` in the root
+2. Run the `docker-build` custom pipeline from any branch
+3. Image will be pushed to Docker Hub with commit SHA and branch name tags
 
 ## Required npm Scripts
 
