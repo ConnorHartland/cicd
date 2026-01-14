@@ -11,7 +11,7 @@ definitions:
             # Run SonarQube + PR report only in PR context
             if [ -n "$BITBUCKET_PR_ID" ]; then
               if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
-                npx sonar-scanner \
+                sonar-scanner \
                   -Dsonar.host.url=$SONAR_HOST_URL \
                   -Dsonar.token=$SONAR_TOKEN \
                   -Dsonar.pullrequest.key=$BITBUCKET_PR_ID \
@@ -38,7 +38,11 @@ definitions:
           - |
             # Run SonarQube analysis (branch analysis for releases)
             if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
-              npx sonar-scanner -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.token=$SONAR_TOKEN
+              VERSION=${BITBUCKET_BRANCH#release/}
+              sonar-scanner \
+                -Dsonar.host.url=$SONAR_HOST_URL \
+                -Dsonar.token=$SONAR_TOKEN \
+                -Dsonar.projectVersion=$VERSION
             fi
           - ./scripts/release_report.sh
           - zip -rq build_${BITBUCKET_COMMIT}.zip dist node_modules package.json package-lock.json

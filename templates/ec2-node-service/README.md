@@ -229,6 +229,6 @@ The pipeline fails if any verification step fails, providing immediate feedback 
 - AWS CLI
 - Prisma engines at `~/engines/`
 - Kerberos tools (`kinit`, `kdestroy`)
-- sonar-scanner (via npx)
+- sonar-scanner (global install)
 - snyk CLI (optional, for security scanning)
 - jq (for JSON processing)
