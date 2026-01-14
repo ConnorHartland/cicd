@@ -3,11 +3,14 @@ definitions:
     - step: &build-and-test
         name: Build & Test
         script:
-          - npm ci
+          - npm ci --silent
           - npm run lint
           - npm run test
           - npm run build
           - ./scripts/sonar.sh
+          - zip -rq build_${BITBUCKET_COMMIT}.zip dist node_modules package.json package-lock.json
+        artifacts:
+          - build*.zip
         runs-on:
           - self.hosted
           - linux.shell
@@ -16,13 +19,15 @@ definitions:
     - step: &build-and-test-release
         name: Build & Test (Release)
         script:
-          - npm ci
+          - npm ci --silent
           - npm run lint
           - npm run test
           - npm run build
           - ./scripts/sonar.sh
           - ./scripts/release_report.sh
+          - zip -rq build_${BITBUCKET_COMMIT}.zip dist node_modules package.json package-lock.json
         artifacts:
+          - build*.zip
           - release-report.json
         runs-on:
           - self.hosted
@@ -32,13 +37,8 @@ definitions:
     - step: &predeploy-nonprod
         name: Pre-deploy
         script:
-          - npm ci
-          - npm run build
-          - zip -r build_${BITBUCKET_COMMIT}.zip dist node_modules package.json package-lock.json
           - ./scripts/setup_kafka.sh $ENV_SUFFIX $ALLOW_TOPIC_RECREATE
           - ./scripts/prisma_migration.sh $SERVICE_NAME $ENV_SUFFIX $SEED
-        artifacts:
-          - build*.zip
         runs-on:
           - self.hosted
           - linux.shell
@@ -47,13 +47,8 @@ definitions:
     - step: &predeploy-prod
         name: Pre-deploy (Production)
         script:
-          - npm ci
-          - npm run build
-          - zip -r build_${BITBUCKET_COMMIT}.zip dist node_modules package.json package-lock.json
           - ./scripts/setup_kafka.sh $ENV_SUFFIX
           - ./scripts/prisma_migration.sh $SERVICE_NAME $ENV_SUFFIX
-        artifacts:
-          - build*.zip
         runs-on:
           - self.hosted
           - linux.shell
@@ -66,9 +61,22 @@ definitions:
           - |
             export AWS_ACCESS_KEY_ID=$(eval echo \$AWS_ACCESS_KEY_ID_$AWS_SUFFIX)
             export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
-          - aws s3 rm s3://$S3_BUCKET --recursive --exclude "*.env"
-          - aws s3 cp build_${BITBUCKET_COMMIT}.zip s3://$S3_BUCKET/build.zip
-          - aws autoscaling start-instance-refresh --region us-east-1 --auto-scaling-group-name $ASG_NAME
+          - aws s3 rm s3://$S3_BUCKET --recursive --exclude "*.env" --quiet
+          - aws s3 cp build_${BITBUCKET_COMMIT}.zip s3://$S3_BUCKET/build.zip --quiet
+          - |
+            PREFERENCES="{\"InstanceWarmup\": ${INSTANCE_WARMUP:-300}}"
+            aws autoscaling start-instance-refresh --region us-east-1 \
+              --auto-scaling-group-name $ASG_NAME \
+              --preferences "$PREFERENCES"
+
+    - step: &verify-deploy
+        name: Verify Deployment
+        image: amazon/aws-cli
+        script:
+          - |
+            export AWS_ACCESS_KEY_ID=$(eval echo \$AWS_ACCESS_KEY_ID_$AWS_SUFFIX)
+            export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
+          - ./scripts/verify_deploy.sh
 
     - step: &tag-release
         name: Tag Release
@@ -93,12 +101,12 @@ pipelines:
   # PULL REQUESTS
   # ===================
   pull-requests:
-    # All PRs get basic CI
+    # All PRs get basic CI (including hotfix/*)
     "**":
       - step: *build-and-test
 
-    # PRs to main get full release pipeline
-    main:
+    # PRs from release/* branches get full release pipeline
+    "release/*":
       - step: *build-and-test-release
       - stage:
           name: Deploy to Test
@@ -106,6 +114,7 @@ pipelines:
           steps:
             - step: *predeploy-nonprod
             - step: *deploy
+            - step: *verify-deploy
       - stage:
           name: Deploy to Staging
           deployment: Staging
@@ -113,6 +122,7 @@ pipelines:
           steps:
             - step: *predeploy-nonprod
             - step: *deploy
+            - step: *verify-deploy
       - stage:
           name: Deploy to Production
           deployment: Production
@@ -120,6 +130,7 @@ pipelines:
           steps:
             - step: *predeploy-prod
             - step: *deploy
+            - step: *verify-deploy
 
   # ===================
   # BRANCH PUSHES
@@ -135,6 +146,7 @@ pipelines:
           steps:
             - step: *predeploy-nonprod
             - step: *deploy
+            - step: *verify-deploy
 
     # Main branch - tag release after PR merge
     main:
@@ -157,6 +169,7 @@ pipelines:
           steps:
             - step: *predeploy-nonprod
             - step: *deploy
+            - step: *verify-deploy
 
     deploy-to-test:
       - variables:
@@ -171,22 +184,17 @@ pipelines:
           steps:
             - step: *predeploy-nonprod
             - step: *deploy
+            - step: *verify-deploy
 
-    deploy-to-staging:
-      - stage:
-          name: Deploy to Staging
-          deployment: Staging
-          steps:
-            - step: *predeploy-nonprod
-            - step: *deploy
-
-    deploy-to-prod:
+    deploy-hotfix:
+      - step: *build-and-test-release
       - stage:
           name: Deploy to Production
           deployment: Production
           steps:
             - step: *predeploy-prod
             - step: *deploy
+            - step: *verify-deploy
 
     setup-kafka:
       - variables:

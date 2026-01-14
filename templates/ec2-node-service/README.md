@@ -10,13 +10,21 @@ Bitbucket Pipeline template for Node.js applications deploying to EC2 via S3 art
 | `feature/*` push | Build & Test | - | Auto |
 | `feature/*` push | Deploy to Develop | `dev` | Manual |
 
-### Release Process (via PR to main)
+### Release Process (PR from release/*)
 | Trigger | Stage | ENV_SUFFIX | Mode |
 |---------|-------|------------|------|
-| PR to `main` | Build & Test + Release Report | - | Auto |
-| PR to `main` | Deploy to Test | `test` | Auto |
-| PR to `main` | Deploy to Staging | `qa` | Manual |
-| PR to `main` | Deploy to Production | `prod` | Manual |
+| PR from `release/*` | Build & Test + Release Report | - | Auto |
+| PR from `release/*` | Deploy to Test | `test` | Auto |
+| PR from `release/*` | Deploy to Staging | `qa` | Manual |
+| PR from `release/*` | Deploy to Production | `prod` | Manual |
+
+### Hotfix Process (PR from hotfix/* + custom pipeline)
+| Trigger | Stage | ENV_SUFFIX | Mode |
+|---------|-------|------------|------|
+| PR from `hotfix/*` | Build & Test | - | Auto |
+| `deploy-hotfix` pipeline | Build & Deploy to Prod | `prod` | Manual |
+
+Hotfix PRs only run basic CI. Use `deploy-hotfix` custom pipeline for prod deployment.
 
 ### Post-Merge
 | Trigger | Action |
@@ -55,6 +63,7 @@ In Bitbucket Repository Settings → Deployments, create environments with these
 - `S3_BUCKET`: `<your-app>-deploy-dev`
 - `ASG_NAME`: `<your-app>-dev-asg`
 - `SERVICE_NAME`: `<your-service-name>`
+- `INSTANCE_WARMUP`: `180` (optional, default: 300)
 
 **Test:**
 - `ENV_SUFFIX`: `test`
@@ -62,6 +71,7 @@ In Bitbucket Repository Settings → Deployments, create environments with these
 - `S3_BUCKET`: `<your-app>-deploy-test`
 - `ASG_NAME`: `<your-app>-test-asg`
 - `SERVICE_NAME`: `<your-service-name>`
+- `INSTANCE_WARMUP`: `180` (optional, default: 300)
 
 **Staging:**
 - `ENV_SUFFIX`: `qa`
@@ -69,6 +79,7 @@ In Bitbucket Repository Settings → Deployments, create environments with these
 - `S3_BUCKET`: `<your-app>-deploy-qa`
 - `ASG_NAME`: `<your-app>-qa-asg`
 - `SERVICE_NAME`: `<your-service-name>`
+- `INSTANCE_WARMUP`: `300` (optional, default: 300)
 
 **Production:**
 - `ENV_SUFFIX`: `prod`
@@ -76,6 +87,7 @@ In Bitbucket Repository Settings → Deployments, create environments with these
 - `S3_BUCKET`: `<your-app>-deploy-prod`
 - `ASG_NAME`: `<your-app>-prod-asg`
 - `SERVICE_NAME`: `<your-service-name>`
+- `INSTANCE_WARMUP`: `300` (optional, default: 300)
 
 ### 4. Customize Scripts
 
@@ -95,7 +107,7 @@ The script reads project info from `package.json`. Ensure your package has a `na
 2. CI automatically runs on push (lint, test, build, sonar)
 3. Manually trigger "Deploy to Develop" when ready to test
 
-### Release Process (PR-Driven)
+### Release Process (PR from release/*)
 1. Create `release/2.11.0` branch from your development branch
 2. Open a **Pull Request** from `release/2.11.0` → `main`
 3. PR pipeline automatically:
@@ -108,12 +120,22 @@ The script reads project info from `package.json`. Ensure your package has a `na
 7. After production is verified, **merge the PR**
 8. Merging automatically creates `v2.11.0` tag on main
 
+**Note:** Only PRs from `release/*` branches trigger the full deployment pipeline. Other PRs only run basic CI.
+
+### Hotfix Process (Urgent Fixes)
+1. Create `hotfix/fix-critical-bug` branch from `main`
+2. Open a **Pull Request** from `hotfix/fix-critical-bug` → `main` (runs basic CI only)
+3. Run the **deploy-hotfix** custom pipeline to build and deploy directly to production
+4. After production is verified, **merge the PR**
+5. Merging automatically creates version tag on main
+
 ### Custom Pipelines
 - **deploy-to-develop**: Manual deploy to dev (with seed option)
 - **deploy-to-test**: Manual deploy to test (with seed option)
-- **deploy-to-staging**: Manual deploy to staging/qa
-- **deploy-to-prod**: Manual deploy to production
+- **deploy-hotfix**: Build + deploy directly to prod (emergency only)
 - **setup-kafka**: Setup Kafka topics for an environment
+
+**Note:** Staging and production deployments must go through the PR release cycle.
 
 ## Required npm Scripts
 
@@ -149,6 +171,31 @@ The report is:
 - `SNYK_TOKEN` - Snyk authentication (optional)
 - `BITBUCKET_EMAIL` - For PR commenting
 - `BITBUCKET_API_TOKEN` - For PR commenting
+
+### Deployment Verification Variables (Optional)
+Configure these per environment to enable post-deploy verification:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HEALTH_ENDPOINT` | HTTP health check URL (optional, only for HTTP services) | - |
+| `SMOKE_TEST_REPO` | Bitbucket repo slug for smoke tests | - |
+| `SMOKE_TEST_WORKSPACE` | Bitbucket workspace for smoke test repo | - |
+| `ASG_REFRESH_TIMEOUT` | Max wait time for ASG refresh (seconds) | 600 |
+| `HEALTH_CHECK_RETRIES` | Number of health check attempts | 10 |
+| `HEALTH_CHECK_INTERVAL` | Seconds between health check retries | 10 |
+| `SMOKE_TEST_TIMEOUT` | Max wait time for smoke tests (seconds) | 600 |
+
+**Note:** Most services communicate via Kafka and don't have HTTP endpoints. Only configure `HEALTH_ENDPOINT` for services with health check routes.
+
+## Deployment Verification
+
+After each deployment, the pipeline runs a verification step that:
+
+1. **Waits for ASG Refresh** - Polls AWS until the instance refresh completes (success/failure)
+2. **Health Check** (optional) - If `HEALTH_ENDPOINT` is configured, verifies the service responds with HTTP 200
+3. **Smoke Tests** (optional) - If `SMOKE_TEST_REPO` is configured, triggers a pipeline in the test repo and waits for completion
+
+The pipeline fails if any verification step fails, providing immediate feedback on deployment issues.
 
 ## Self-Hosted Runner Requirements
 
