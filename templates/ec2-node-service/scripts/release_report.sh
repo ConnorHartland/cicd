@@ -12,7 +12,11 @@ VERSION=${BITBUCKET_BRANCH#release/}
 echo "Release Version: ${VERSION}"
 
 # Get project info
-PROJECT_KEY=${SONAR_PROJECT_KEY:-$(node -p "require('./package.json').name" 2>/dev/null || echo "unknown")}
+# Get project key from sonar-project.properties
+PROJECT_KEY=$(grep "^sonar.projectKey=" sonar-project.properties 2>/dev/null | cut -d'=' -f2 || echo "")
+if [ -z "$PROJECT_KEY" ]; then
+  PROJECT_KEY=${SONAR_PROJECT_KEY:-"unknown"}
+fi
 PROJECT_NAME=$(node -p "require('./package.json').name" 2>/dev/null || echo "Unknown Project")
 
 #######################################

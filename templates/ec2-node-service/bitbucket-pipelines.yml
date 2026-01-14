@@ -8,6 +8,7 @@ definitions:
           - npm run test
           - npm run build
           - ./scripts/sonar.sh
+          - ./scripts/pr_report.sh
           - zip -rq build_${BITBUCKET_COMMIT}.zip dist node_modules package.json package-lock.json
         artifacts:
           - build*.zip

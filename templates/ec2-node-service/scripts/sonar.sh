@@ -1,6 +1,6 @@
 #!/bin/bash
 # sonar.sh
-# Runs SonarQube analysis and posts results to Bitbucket PR
+# Runs SonarQube analysis (reads config from sonar-project.properties)
 # Requires: SONAR_TOKEN, SONAR_HOST_URL environment variables
 
 set -e
@@ -16,45 +16,31 @@ if [ -z "$SONAR_HOST_URL" ]; then
   exit 1
 fi
 
-# Get project key from package.json name or use env var
-PROJECT_KEY=${SONAR_PROJECT_KEY:-$(node -p "require('./package.json').name" 2>/dev/null || echo "")}
-PROJECT_VERSION=${SONAR_PROJECT_VERSION:-$(node -p "require('./package.json').version" 2>/dev/null || echo "1.0.0")}
-
-if [ -z "$PROJECT_KEY" ]; then
-  echo "Error: Could not determine project key. Set SONAR_PROJECT_KEY or ensure package.json has a name field."
-  exit 1
-fi
-
 echo "Running SonarQube analysis..."
-echo "Project: $PROJECT_KEY"
-echo "Version: $PROJECT_VERSION"
 echo "Host: $SONAR_HOST_URL"
 
-# Run sonar-scanner
+# Run sonar-scanner (reads sonar-project.properties from repo)
 if command -v sonar-scanner &> /dev/null; then
   sonar-scanner \
-    -Dsonar.projectKey="$PROJECT_KEY" \
-    -Dsonar.projectVersion="$PROJECT_VERSION" \
-    -Dsonar.sources=src \
     -Dsonar.host.url="$SONAR_HOST_URL" \
-    -Dsonar.token="$SONAR_TOKEN" \
-    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
-    -Dsonar.testExecutionReportPaths=test-report.xml
-elif npm list sonar-scanner &> /dev/null; then
+    -Dsonar.token="$SONAR_TOKEN"
+elif npx sonar-scanner --version &> /dev/null; then
   npx sonar-scanner \
-    -Dsonar.projectKey="$PROJECT_KEY" \
-    -Dsonar.projectVersion="$PROJECT_VERSION" \
-    -Dsonar.sources=src \
     -Dsonar.host.url="$SONAR_HOST_URL" \
-    -Dsonar.token="$SONAR_TOKEN" \
-    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
-    -Dsonar.testExecutionReportPaths=test-report.xml
+    -Dsonar.token="$SONAR_TOKEN"
 else
   echo "Error: sonar-scanner not found. Install it globally or add to package.json devDependencies."
   exit 1
 fi
 
 echo "SonarQube scan complete. Fetching results..."
+
+# Get project key from sonar-project.properties
+PROJECT_KEY=$(grep "^sonar.projectKey=" sonar-project.properties 2>/dev/null | cut -d'=' -f2 || echo "")
+if [ -z "$PROJECT_KEY" ]; then
+  echo "Warning: Could not read sonar.projectKey from sonar-project.properties"
+  PROJECT_KEY=${SONAR_PROJECT_KEY:-"unknown"}
+fi
 
 # API helper function
 API_BASE="${SONAR_HOST_URL}/api"
@@ -168,31 +154,7 @@ COMMENT+="| :octagonal_sign: Blocker | **${BLOCKER}** |\n"
 COMMENT+="| :bangbang: High | **${HIGH}** |\n"
 COMMENT+="| :warning: Medium | **${MEDIUM}** |\n"
 
-COMMENT=$(echo -e "$COMMENT")
-
-# Post to Bitbucket PR if in PR context
-if [ -n "$BITBUCKET_PR_ID" ]; then
-  echo "Posting to PR #${BITBUCKET_PR_ID}..."
-
-  RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-    -u "${BITBUCKET_EMAIL}:${BITBUCKET_API_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json" \
-    "https://api.bitbucket.org/2.0/repositories/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pullrequests/${BITBUCKET_PR_ID}/comments" \
-    -d "{\"content\": {\"raw\": $(echo "$COMMENT" | jq -Rs .)}}")
-
-  HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-  BODY=$(echo "$RESPONSE" | head -n-1)
-
-  if [ "$HTTP_CODE" = "201" ]; then
-    echo "Comment posted successfully"
-  else
-    echo "Failed to post comment (HTTP ${HTTP_CODE})"
-    echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
-  fi
-else
-  echo "Not in PR context - skipping comment post"
-fi
+# Note: PR comments are handled by pr_report.sh or release_report.sh
 
 # Fail pipeline if quality gate failed
 if [ "$QG_STATUS" = "ERROR" ]; then
