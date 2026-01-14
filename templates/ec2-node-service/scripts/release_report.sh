@@ -33,6 +33,16 @@ NPM_MODERATE=$(echo "$NPM_AUDIT_JSON" | jq '.metadata.vulnerabilities.moderate /
 NPM_LOW=$(echo "$NPM_AUDIT_JSON" | jq '.metadata.vulnerabilities.low // 0')
 NPM_TOTAL=$(echo "$NPM_AUDIT_JSON" | jq '.metadata.vulnerabilities.total // 0')
 
+# Extract critical/high vulnerability details
+NPM_DETAILS=""
+if [ "$NPM_CRITICAL" -gt 0 ] || [ "$NPM_HIGH" -gt 0 ]; then
+  NPM_DETAILS=$(echo "$NPM_AUDIT_JSON" | jq -r '
+    .vulnerabilities | to_entries[] |
+    select(.value.severity == "critical" or .value.severity == "high") |
+    "| \(.value.severity | ascii_upcase) | \(.key) | \(.value.via[0].title // .value.via[0] // "N/A") |"
+  ' 2>/dev/null | head -20 || true)
+fi
+
 echo "npm audit - Critical: ${NPM_CRITICAL}, High: ${NPM_HIGH}, Moderate: ${NPM_MODERATE}, Low: ${NPM_LOW}"
 
 #######################################
@@ -47,6 +57,7 @@ SNYK_HIGH=0
 SNYK_MEDIUM=0
 SNYK_LOW=0
 
+SNYK_DETAILS=""
 if [ -n "$SNYK_TOKEN" ]; then
   SNYK_JSON=$(snyk test --json 2>/dev/null || true)
 
@@ -55,6 +66,15 @@ if [ -n "$SNYK_TOKEN" ]; then
     SNYK_HIGH=$(echo "$SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "high")] | length')
     SNYK_MEDIUM=$(echo "$SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "medium")] | length')
     SNYK_LOW=$(echo "$SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "low")] | length')
+
+    # Extract critical/high vulnerability details
+    if [ "$SNYK_CRITICAL" -gt 0 ] || [ "$SNYK_HIGH" -gt 0 ]; then
+      SNYK_DETAILS=$(echo "$SNYK_JSON" | jq -r '
+        [.vulnerabilities[]? | select(.severity == "critical" or .severity == "high")] |
+        unique_by(.id) | .[:20][] |
+        "| \(.severity | ascii_upcase) | \(.packageName) | \(.title // "N/A") |"
+      ' 2>/dev/null || true)
+    fi
   fi
   echo "Snyk - Critical: ${SNYK_CRITICAL}, High: ${SNYK_HIGH}, Medium: ${SNYK_MEDIUM}, Low: ${SNYK_LOW}"
 else
@@ -73,6 +93,7 @@ SONAR_SMELLS="-"
 SONAR_COVERAGE="-"
 SONAR_HOTSPOTS="-"
 SONAR_QG_STATUS="N/A"
+SONAR_DETAILS=""
 
 if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
   API_BASE="${SONAR_HOST_URL}/api"
@@ -92,6 +113,16 @@ if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
   # Fetch quality gate
   QG=$(curl -s -u "${SONAR_TOKEN}:" "${API_BASE}/qualitygates/project_status?projectKey=${PROJECT_KEY}" || true)
   SONAR_QG_STATUS=$(echo "$QG" | jq -r '.projectStatus.status // "N/A"')
+
+  # Fetch blocker/critical issues
+  ISSUES_JSON=$(curl -s -u "${SONAR_TOKEN}:" \
+    "${API_BASE}/issues/search?componentKeys=${PROJECT_KEY}&severities=BLOCKER,CRITICAL&resolved=false&ps=20" || true)
+  if [ -n "$ISSUES_JSON" ]; then
+    SONAR_DETAILS=$(echo "$ISSUES_JSON" | jq -r '
+      .issues[]? |
+      "| \(.severity) | \(.message[0:60] | gsub("\\|"; "-"))... | \(.component | split(":") | last) |"
+    ' 2>/dev/null || true)
+  fi
 
   echo "SonarQube - QG: ${SONAR_QG_STATUS}, Bugs: ${SONAR_BUGS}, Vulns: ${SONAR_VULNS}"
 else
@@ -137,6 +168,17 @@ REPORT+="| :poop: Code Smells | ${SONAR_SMELLS} |\n"
 REPORT+="| :fire: Security Hotspots | ${SONAR_HOTSPOTS} |\n"
 REPORT+="| :bar_chart: Coverage | ${SONAR_COVERAGE}% |\n\n"
 
+# Add collapsible blocker/critical issues
+if [ -n "$SONAR_DETAILS" ]; then
+  SONAR_ISSUE_COUNT=$(echo "$SONAR_DETAILS" | grep -c "^|" || echo "0")
+  REPORT+="<details>\n"
+  REPORT+="<summary>View Blocker/Critical Issues (${SONAR_ISSUE_COUNT})</summary>\n\n"
+  REPORT+="| Severity | Message | File |\n"
+  REPORT+="|----------|---------|------|\n"
+  REPORT+="${SONAR_DETAILS}\n\n"
+  REPORT+="</details>\n\n"
+fi
+
 if [ -n "$SONAR_HOST_URL" ]; then
   REPORT+="[View Full SonarQube Report](${SONAR_HOST_URL}/dashboard?id=${PROJECT_KEY})\n\n"
 fi
@@ -155,6 +197,17 @@ else
   REPORT+="| :warning: Moderate | ${NPM_MODERATE} |\n"
   REPORT+="| :information_source: Low | ${NPM_LOW} |\n"
   REPORT+="| **Total** | **${NPM_TOTAL}** |\n\n"
+
+  # Add collapsible critical/high vulnerabilities
+  if [ -n "$NPM_DETAILS" ]; then
+    NPM_DETAIL_COUNT=$((NPM_CRITICAL + NPM_HIGH))
+    REPORT+="<details>\n"
+    REPORT+="<summary>View Critical/High Vulnerabilities (${NPM_DETAIL_COUNT})</summary>\n\n"
+    REPORT+="| Severity | Package | Description |\n"
+    REPORT+="|----------|---------|-------------|\n"
+    REPORT+="${NPM_DETAILS}\n\n"
+    REPORT+="</details>\n\n"
+  fi
 fi
 
 # Snyk Section
@@ -172,11 +225,22 @@ else
   REPORT+="| :bangbang: High | ${SNYK_HIGH} |\n"
   REPORT+="| :warning: Medium | ${SNYK_MEDIUM} |\n"
   REPORT+="| :information_source: Low | ${SNYK_LOW} |\n\n"
+
+  # Add collapsible critical/high vulnerabilities
+  if [ -n "$SNYK_DETAILS" ]; then
+    SNYK_DETAIL_COUNT=$((SNYK_CRITICAL + SNYK_HIGH))
+    REPORT+="<details>\n"
+    REPORT+="<summary>View Critical/High Vulnerabilities (${SNYK_DETAIL_COUNT})</summary>\n\n"
+    REPORT+="| Severity | Package | Description |\n"
+    REPORT+="|----------|---------|-------------|\n"
+    REPORT+="${SNYK_DETAILS}\n\n"
+    REPORT+="</details>\n\n"
+  fi
 fi
 
 # Footer
 REPORT+="---\n\n"
-REPORT+="_Generated by CI/CD Pipeline | $(date -u '+%Y-%m-%d %H:%M:%S UTC')_\n"
+REPORT+="_Generated by CI/CD Pipeline | $(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S CT')_\n"
 
 REPORT=$(echo -e "$REPORT")
 
@@ -226,7 +290,7 @@ cat > release-report.json << EOF
   "project": "${PROJECT_NAME}",
   "branch": "${BITBUCKET_BRANCH}",
   "commit": "${BITBUCKET_COMMIT}",
-  "timestamp": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+  "timestamp": "$(TZ='America/Chicago' date '+%Y-%m-%dT%H:%M:%S-06:00')",
   "sonarqube": {
     "qualityGate": "${SONAR_QG_STATUS}",
     "bugs": "${SONAR_BUGS}",
