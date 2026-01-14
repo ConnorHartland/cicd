@@ -7,7 +7,17 @@ definitions:
           - npm run lint
           - npm run test
           - npm run build
-          - ./scripts/sonar.sh
+          - |
+            # Run SonarQube analysis with PR decoration
+            if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
+              SONAR_ARGS="-Dsonar.host.url=$SONAR_HOST_URL -Dsonar.token=$SONAR_TOKEN"
+              if [ -n "$BITBUCKET_PR_ID" ]; then
+                SONAR_ARGS="$SONAR_ARGS -Dsonar.pullrequest.key=$BITBUCKET_PR_ID"
+                SONAR_ARGS="$SONAR_ARGS -Dsonar.pullrequest.branch=$BITBUCKET_BRANCH"
+                SONAR_ARGS="$SONAR_ARGS -Dsonar.pullrequest.base=main"
+              fi
+              npx sonar-scanner $SONAR_ARGS
+            fi
           - ./scripts/pr_report.sh
           - zip -rq build_${BITBUCKET_COMMIT}.zip dist node_modules package.json package-lock.json
         artifacts:
@@ -24,7 +34,11 @@ definitions:
           - npm run lint
           - npm run test
           - npm run build
-          - ./scripts/sonar.sh
+          - |
+            # Run SonarQube analysis (branch analysis for releases)
+            if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
+              npx sonar-scanner -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.token=$SONAR_TOKEN
+            fi
           - ./scripts/release_report.sh
           - zip -rq build_${BITBUCKET_COMMIT}.zip dist node_modules package.json package-lock.json
         artifacts:

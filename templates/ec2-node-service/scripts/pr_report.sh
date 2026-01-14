@@ -50,25 +50,27 @@ if [ -n "$SNYK_TOKEN" ]; then
 fi
 
 #######################################
-# SONARQUBE
+# SONARQUBE (PR-specific issues)
 #######################################
-echo "Fetching SonarQube results..."
+echo "Fetching SonarQube PR results..."
 SONAR_STATUS="-"
-SONAR_BUGS="-"
-SONAR_VULNS="-"
-SONAR_COVERAGE="-"
+SONAR_BUGS=0
+SONAR_VULNS=0
+SONAR_SMELLS=0
 
 if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
-  # Fetch quality gate
-  QG=$(curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=${PROJECT_KEY}" || true)
+  # Fetch PR-specific quality gate status
+  QG=$(curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=${PROJECT_KEY}&pullRequest=${BITBUCKET_PR_ID}" || true)
   SONAR_STATUS=$(echo "$QG" | jq -r '.projectStatus.status // "N/A"')
 
-  # Fetch measures
-  METRICS=$(curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/measures/component?component=${PROJECT_KEY}&metricKeys=bugs,vulnerabilities,coverage" || true)
-  if [ -n "$METRICS" ]; then
-    SONAR_BUGS=$(echo "$METRICS" | jq -r '.component.measures[]? | select(.metric == "bugs") | .value // "-"')
-    SONAR_VULNS=$(echo "$METRICS" | jq -r '.component.measures[]? | select(.metric == "vulnerabilities") | .value // "-"')
-    SONAR_COVERAGE=$(echo "$METRICS" | jq -r '.component.measures[]? | select(.metric == "coverage") | .value // "-"')
+  # Fetch PR-specific issues (NEW issues introduced by this PR)
+  ISSUES=$(curl -s -u "${SONAR_TOKEN}:" \
+    "${SONAR_HOST_URL}/api/issues/search?componentKeys=${PROJECT_KEY}&pullRequest=${BITBUCKET_PR_ID}&resolved=false&ps=500" || true)
+
+  if [ -n "$ISSUES" ]; then
+    SONAR_BUGS=$(echo "$ISSUES" | jq '[.issues[]? | select(.type == "BUG")] | length')
+    SONAR_VULNS=$(echo "$ISSUES" | jq '[.issues[]? | select(.type == "VULNERABILITY")] | length')
+    SONAR_SMELLS=$(echo "$ISSUES" | jq '[.issues[]? | select(.type == "CODE_SMELL")] | length')
   fi
 fi
 
@@ -79,8 +81,13 @@ echo "Building PR report..."
 
 # Determine status icons
 SONAR_ICON=":white_check_mark:"
-[ "$SONAR_STATUS" = "ERROR" ] && SONAR_ICON=":x:"
-[ "$SONAR_STATUS" = "N/A" ] && SONAR_ICON=":grey_question:"
+if [ "$SONAR_STATUS" = "ERROR" ]; then
+  SONAR_ICON=":x:"
+elif [ "$SONAR_STATUS" = "N/A" ] || [ "$SONAR_STATUS" = "-" ]; then
+  SONAR_ICON=":grey_question:"
+elif [ "$SONAR_BUGS" -gt 0 ] || [ "$SONAR_VULNS" -gt 0 ]; then
+  SONAR_ICON=":warning:"
+fi
 
 NPM_ICON=":white_check_mark:"
 [ "$NPM_CRITICAL" -gt 0 ] || [ "$NPM_HIGH" -gt 0 ] && NPM_ICON=":x:"
@@ -95,10 +102,12 @@ else
 fi
 
 # Build compact report
-REPORT="## :shield: Security Report\\n\\n"
+SONAR_TOTAL=$((SONAR_BUGS + SONAR_VULNS + SONAR_SMELLS))
+REPORT="## :shield: PR Security Report\\n\\n"
+REPORT+="_Issues introduced in this PR:_\\n\\n"
 REPORT+="| Check | Status | Details |\\n"
 REPORT+="|-------|--------|---------|\\n"
-REPORT+="| SonarQube | ${SONAR_ICON} ${SONAR_STATUS} | ${SONAR_BUGS} bugs, ${SONAR_VULNS} vulns, ${SONAR_COVERAGE}% coverage |\\n"
+REPORT+="| SonarQube | ${SONAR_ICON} ${SONAR_STATUS} | ${SONAR_BUGS} bugs, ${SONAR_VULNS} vulns, ${SONAR_SMELLS} smells |\\n"
 REPORT+="| npm audit | ${NPM_ICON} ${NPM_TOTAL} issues | C:${NPM_CRITICAL} H:${NPM_HIGH} M:${NPM_MODERATE} L:${NPM_LOW} |\\n"
 
 if [ -z "$SNYK_TOKEN" ]; then

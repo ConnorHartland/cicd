@@ -97,8 +97,8 @@ Edit the script to add your service's database configurations for each environme
 **setup_kafka.sh:**
 Ensure your service has a `kafka:setup` npm script that reads from `kafka.yml`.
 
-**sonar.sh:**
-The script reads project info from `package.json`. Ensure your package has a `name` field.
+**SonarQube:**
+SonarQube analysis runs inline in the pipeline. Ensure your repo has a `sonar-project.properties` file with `sonar.projectKey` configured.
 
 ## Usage
 
@@ -155,15 +155,22 @@ Your `package.json` should include:
 }
 ```
 
-## Release Security Report
+## Security Reports
 
-For **PRs to main**, the pipeline automatically generates a consolidated security report that includes:
-- **SonarQube**: Quality gate status, bugs, vulnerabilities, code smells, coverage
+### PR Report (All PRs)
+For all PRs, the pipeline posts a condensed security report showing **issues introduced by this PR**:
+- **SonarQube**: New bugs, vulnerabilities, code smells introduced in this PR
 - **npm audit**: Dependency vulnerability counts by severity
 - **Snyk**: Security scan results (if SNYK_TOKEN is configured)
 
-The report is:
-1. Posted as a comment to the PR (if in PR context)
+### Release Report (Release PRs)
+For PRs from `release/*` branches, a full consolidated report shows **project snapshot**:
+- **SonarQube**: Total quality gate status, bugs, vulnerabilities, code smells, coverage
+- **npm audit**: Full dependency vulnerability breakdown
+- **Snyk**: Complete security scan results
+
+The release report is:
+1. Posted as a comment to the PR
 2. Saved as `release-report.json` artifact
 3. Printed to the pipeline console
 
@@ -203,6 +210,6 @@ The pipeline fails if any verification step fails, providing immediate feedback 
 - AWS CLI
 - Prisma engines at `~/engines/`
 - Kerberos tools (`kinit`, `kdestroy`)
-- sonar-scanner (global or via npm)
+- sonar-scanner (via npx)
 - snyk CLI (optional, for security scanning)
 - jq (for JSON processing)
