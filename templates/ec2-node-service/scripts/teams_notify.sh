@@ -48,11 +48,17 @@ case $STATUS in
     ;;
 esac
 
-# Build the data payload for Power Automate Adaptive Card Templating
-# Power Automate has the card template with ${fieldName} placeholders
-# This script sends only the data values to fill those placeholders
+# Build the payload for Power Automate
+# Includes both the message wrapper AND flat properties for triggerBody() access
 PAYLOAD=$(cat << EOF
 {
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "content": {}
+    }
+  ],
   "title": "${TITLE}",
   "serviceName": "${SERVICE_NAME}",
   "environment": "${ENVIRONMENT_UPPER}",
