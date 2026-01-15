@@ -5,15 +5,42 @@
   "body": [
     {
       "type": "TextBlock",
-      "size": "Medium",
+      "size": "Large",
       "weight": "Bolder",
       "text": "@{triggerBody()?['title']}"
     },
     {
-      "type": "TextBlock",
-      "text": "@{triggerBody()?['serviceName']}",
-      "isSubtle": true,
-      "spacing": "None"
+      "type": "ColumnSet",
+      "columns": [
+        {
+          "type": "Column",
+          "width": "auto",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "@{triggerBody()?['serviceName']}",
+              "weight": "Bolder",
+              "size": "Medium"
+            }
+          ],
+          "selectAction": {
+            "type": "Action.OpenUrl",
+            "url": "@{triggerBody()?['repoUrl']}"
+          }
+        },
+        {
+          "type": "Column",
+          "width": "stretch",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "@{triggerBody()?['buildNumber']}",
+              "isSubtle": true,
+              "horizontalAlignment": "Right"
+            }
+          ]
+        }
+      ]
     },
     {
       "type": "FactSet",
@@ -46,6 +73,16 @@
       "type": "Action.OpenUrl",
       "title": "View Pipeline",
       "url": "@{triggerBody()?['pipelineUrl']}"
+    },
+    {
+      "type": "Action.OpenUrl",
+      "title": "View Commit",
+      "url": "@{triggerBody()?['commitUrl']}"
+    },
+    {
+      "type": "Action.OpenUrl",
+      "title": "View Branch",
+      "url": "@{triggerBody()?['branchUrl']}"
     }
   ]
 }
