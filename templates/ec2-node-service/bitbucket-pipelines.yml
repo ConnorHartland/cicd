@@ -8,16 +8,15 @@ definitions:
           - npm run test
           - npm run build
           - |
-            # Run SonarQube + PR report only in PR context
+            # Run SonarQube analysis (CE - no branch/PR support)
+            if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
+              sonar-scanner \
+                -Dsonar.host.url=$SONAR_HOST_URL \
+                -Dsonar.token=$SONAR_TOKEN
+            fi
+          - |
+            # Run PR report only in PR context
             if [ -n "$BITBUCKET_PR_ID" ]; then
-              if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
-                sonar-scanner \
-                  -Dsonar.host.url=$SONAR_HOST_URL \
-                  -Dsonar.token=$SONAR_TOKEN \
-                  -Dsonar.pullrequest.key=$BITBUCKET_PR_ID \
-                  -Dsonar.pullrequest.branch=$BITBUCKET_BRANCH \
-                  -Dsonar.pullrequest.base=main
-              fi
               ./scripts/pr_report.sh
             fi
           - zip -rq build_${BITBUCKET_COMMIT}.zip dist node_modules package.json package-lock.json
@@ -49,6 +48,7 @@ definitions:
         artifacts:
           - build*.zip
           - release-report.json
+          - release-report.html
         runs-on:
           - self.hosted
           - linux.shell
@@ -97,6 +97,7 @@ definitions:
             export AWS_ACCESS_KEY_ID=$(eval echo \$AWS_ACCESS_KEY_ID_$AWS_SUFFIX)
             export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
           - ./scripts/verify_deploy.sh
+          - ./scripts/newrelic_deploy.sh
 
     - step: &tag-release
         name: Tag Release

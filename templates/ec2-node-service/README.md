@@ -198,6 +198,26 @@ The release report is:
 - `BITBUCKET_EMAIL` - For PR commenting
 - `BITBUCKET_API_TOKEN` - For PR commenting
 
+### New Relic Deployment Markers (Optional)
+Configure these to post deployment markers to New Relic after successful deployments:
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `NEW_RELIC_API_KEY` | New Relic User API key | Yes |
+| `NEW_RELIC_ENTITY_GUID` | Application entity GUID from New Relic | Yes |
+| `NEW_RELIC_REGION` | `US` (default) or `EU` | No |
+
+**Finding your Entity GUID:**
+1. Go to New Relic One → APM → Your Application
+2. Click the "..." menu → "See metadata & tags"
+3. Copy the "Entity GUID" value
+
+The deployment marker includes:
+- Version (commit SHA or release version)
+- Environment
+- Commit message as changelog
+- Link back to the Bitbucket pipeline
+
 ### Deployment Verification Variables (Optional)
 Configure these per environment to enable post-deploy verification:
 
