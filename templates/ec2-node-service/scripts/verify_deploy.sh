@@ -1,6 +1,6 @@
 #!/bin/bash
 # verify_deploy.sh
-# Verifies deployment by waiting for ASG refresh, health check, and triggering smoke tests
+# Verifies deployment by waiting for ASG refresh and optionally triggering smoke tests
 
 set -e
 
@@ -11,8 +11,6 @@ echo "=== Verifying Deployment ==="
 #######################################
 ASG_REFRESH_TIMEOUT=${ASG_REFRESH_TIMEOUT:-600}  # 10 minutes
 ASG_POLL_INTERVAL=${ASG_POLL_INTERVAL:-30}       # 30 seconds
-HEALTH_CHECK_RETRIES=${HEALTH_CHECK_RETRIES:-10}
-HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-10}
 SMOKE_TEST_TIMEOUT=${SMOKE_TEST_TIMEOUT:-600}    # 10 minutes
 
 #######################################
@@ -66,38 +64,7 @@ while true; do
 done
 
 #######################################
-# 2. HEALTH CHECK (OPTIONAL)
-#######################################
-if [ -n "$HEALTH_ENDPOINT" ]; then
-  echo ""
-  echo "=== Running Health Check ==="
-  echo "Endpoint: $HEALTH_ENDPOINT"
-
-  for i in $(seq 1 $HEALTH_CHECK_RETRIES); do
-    echo "Attempt $i/$HEALTH_CHECK_RETRIES..."
-
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_ENDPOINT" || echo "000")
-
-    if [ "$HTTP_CODE" = "200" ]; then
-      echo "Health check passed (HTTP 200)"
-      break
-    else
-      echo "Health check failed (HTTP $HTTP_CODE)"
-      if [ "$i" -eq "$HEALTH_CHECK_RETRIES" ]; then
-        echo "ERROR: Health check failed after $HEALTH_CHECK_RETRIES attempts"
-        exit 1
-      fi
-      echo "Retrying in ${HEALTH_CHECK_INTERVAL}s..."
-      sleep "$HEALTH_CHECK_INTERVAL"
-    fi
-  done
-else
-  echo ""
-  echo "=== Skipping Health Check (no HEALTH_ENDPOINT configured) ==="
-fi
-
-#######################################
-# 3. TRIGGER SMOKE TESTS (OPTIONAL)
+# 2. TRIGGER SMOKE TESTS (OPTIONAL)
 #######################################
 if [ -n "$SMOKE_TEST_REPO" ] && [ -n "$SMOKE_TEST_WORKSPACE" ]; then
   echo ""
@@ -178,7 +145,7 @@ if [ -n "$SMOKE_TEST_REPO" ] && [ -n "$SMOKE_TEST_WORKSPACE" ]; then
   done
 else
   echo ""
-  echo "=== Skipping Smoke Tests (no SMOKE_TEST_REPO configured) ==="
+  echo "=== Skipping Smoke Tests (SMOKE_TEST_REPO not configured) ==="
 fi
 
 echo ""

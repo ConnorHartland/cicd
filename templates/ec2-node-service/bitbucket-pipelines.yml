@@ -77,6 +77,7 @@ definitions:
         name: Deploy to AWS
         image: amazon/aws-cli
         script:
+          - ./scripts/teams_notify.sh start
           - |
             export AWS_ACCESS_KEY_ID=$(eval echo \$AWS_ACCESS_KEY_ID_$AWS_SUFFIX)
             export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
@@ -95,7 +96,13 @@ definitions:
           - |
             export AWS_ACCESS_KEY_ID=$(eval echo \$AWS_ACCESS_KEY_ID_$AWS_SUFFIX)
             export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
-          - ./scripts/verify_deploy.sh
+          - |
+            if ./scripts/verify_deploy.sh; then
+              ./scripts/teams_notify.sh success
+            else
+              ./scripts/teams_notify.sh failure
+              exit 1
+            fi
           - ./scripts/newrelic_deploy.sh
 
     - step: &tag-release

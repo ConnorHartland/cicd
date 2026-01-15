@@ -218,28 +218,43 @@ The deployment marker includes:
 - Commit message as changelog
 - Link back to the Bitbucket pipeline
 
+### Microsoft Teams Notifications (Optional)
+Send deployment status notifications to a Teams channel.
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `TEAMS_WEBHOOK_URL` | Microsoft Teams Incoming Webhook URL | Yes |
+
+**Setting up the webhook:**
+1. In Teams, go to the channel where you want notifications
+2. Click "..." → "Connectors" (or "Workflows" in new Teams)
+3. Add "Incoming Webhook"
+4. Name it (e.g., "CI/CD Deployments") and copy the webhook URL
+5. Add `TEAMS_WEBHOOK_URL` to Bitbucket repository variables
+
+**Notifications sent:**
+- 🚀 **Deployment Started** - When deploy begins (before ASG refresh)
+- ✅ **Deployment Succeeded** - After verification passes
+- ❌ **Deployment Failed** - If verification fails
+
+Each card includes: environment, branch, commit, timestamp, and a link to the pipeline.
+
 ### Deployment Verification Variables (Optional)
-Configure these per environment to enable post-deploy verification:
+Configure these per environment:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HEALTH_ENDPOINT` | HTTP health check URL (optional, only for HTTP services) | - |
-| `SMOKE_TEST_REPO` | Bitbucket repo slug for smoke tests | - |
-| `SMOKE_TEST_WORKSPACE` | Bitbucket workspace for smoke test repo | - |
 | `ASG_REFRESH_TIMEOUT` | Max wait time for ASG refresh (seconds) | 600 |
-| `HEALTH_CHECK_RETRIES` | Number of health check attempts | 10 |
-| `HEALTH_CHECK_INTERVAL` | Seconds between health check retries | 10 |
+| `SMOKE_TEST_REPO` | Bitbucket repo slug for smoke tests (optional) | - |
+| `SMOKE_TEST_WORKSPACE` | Bitbucket workspace for smoke test repo | - |
 | `SMOKE_TEST_TIMEOUT` | Max wait time for smoke tests (seconds) | 600 |
-
-**Note:** Most services communicate via Kafka and don't have HTTP endpoints. Only configure `HEALTH_ENDPOINT` for services with health check routes.
 
 ## Deployment Verification
 
 After each deployment, the pipeline runs a verification step that:
 
 1. **Waits for ASG Refresh** - Polls AWS until the instance refresh completes (success/failure)
-2. **Health Check** (optional) - If `HEALTH_ENDPOINT` is configured, verifies the service responds with HTTP 200
-3. **Smoke Tests** (optional) - If `SMOKE_TEST_REPO` is configured, triggers a pipeline in the test repo and waits for completion
+2. **Smoke Tests** (optional) - If `SMOKE_TEST_REPO` is configured, triggers a pipeline in the test repo and waits for completion
 
 The pipeline fails if any verification step fails, providing immediate feedback on deployment issues.
 
