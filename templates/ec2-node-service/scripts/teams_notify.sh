@@ -55,13 +55,11 @@ PAYLOAD=$(cat << EOF
 {
   "title": "${TITLE}",
   "serviceName": "${SERVICE_NAME}",
-  "properties": [
-    { "key": "Environment", "value": "${ENVIRONMENT_UPPER}" },
-    { "key": "Branch", "value": "${BRANCH}" },
-    { "key": "Commit", "value": "${COMMIT}" },
-    { "key": "Status", "value": "${FACT_STATUS}" },
-    { "key": "Time", "value": "${TIMESTAMP}" }
-  ],
+  "environment": "${ENVIRONMENT_UPPER}",
+  "branch": "${BRANCH}",
+  "commit": "${COMMIT}",
+  "status": "${FACT_STATUS}",
+  "timestamp": "${TIMESTAMP}",
   "pipelineUrl": "${PIPELINE_URL}"
 }
 EOF

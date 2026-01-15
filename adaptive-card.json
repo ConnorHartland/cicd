@@ -4,33 +4,40 @@
     "version": "1.4",
     "body": [
       {
-        "type": "Container",
-        "style": "@{triggerBody()?['color']}",
-        "items": [
-          {
-            "type": "TextBlock",
-            "text": "@{triggerBody()?['title']}",
-            "weight": "Bolder",
-            "size": "Medium"
-          },
-          {
-            "type": "TextBlock",
-            "text": "@{triggerBody()?['serviceName']}",
-            "spacing": "None",
-            "isSubtle": true
-          }
-        ],
-        "bleed": true,
-        "padding": "Default"
+        "type": "TextBlock",
+        "size": "Medium",
+        "weight": "Bolder",
+        "text": "${title}"
+      },
+      {
+        "type": "TextBlock",
+        "text": "${serviceName}",
+        "isSubtle": true,
+        "spacing": "None"
       },
       {
         "type": "FactSet",
         "facts": [
-          { "title": "Environment", "value": "@{triggerBody()?['environment']}" },
-          { "title": "Branch", "value": "@{triggerBody()?['branch']}" },
-          { "title": "Commit", "value": "@{triggerBody()?['commit']}" },
-          { "title": "Status", "value": "@{triggerBody()?['status']}" },
-          { "title": "Time", "value": "@{triggerBody()?['timestamp']}" }
+          {
+            "title": "Environment",
+            "value": "${environment}"
+          },
+          {
+            "title": "Branch",
+            "value": "${branch}"
+          },
+          {
+            "title": "Commit",
+            "value": "${commit}"
+          },
+          {
+            "title": "Status",
+            "value": "${status}"
+          },
+          {
+            "title": "Time",
+            "value": "${timestamp}"
+          }
         ]
       }
     ],
@@ -38,7 +45,7 @@
       {
         "type": "Action.OpenUrl",
         "title": "View Pipeline",
-        "url": "@{triggerBody()?['pipelineUrl']}"
+        "url": "${pipelineUrl}"
       }
     ]
   }
