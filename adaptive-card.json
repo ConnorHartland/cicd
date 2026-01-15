@@ -7,37 +7,22 @@
         "type": "TextBlock",
         "size": "Medium",
         "weight": "Bolder",
-        "text": "${title}"
+        "text": "@{triggerBody()?['title']}"
       },
       {
         "type": "TextBlock",
-        "text": "${serviceName}",
+        "text": "@{triggerBody()?['serviceName']}",
         "isSubtle": true,
         "spacing": "None"
       },
       {
         "type": "FactSet",
         "facts": [
-          {
-            "title": "Environment",
-            "value": "${environment}"
-          },
-          {
-            "title": "Branch",
-            "value": "${branch}"
-          },
-          {
-            "title": "Commit",
-            "value": "${commit}"
-          },
-          {
-            "title": "Status",
-            "value": "${status}"
-          },
-          {
-            "title": "Time",
-            "value": "${timestamp}"
-          }
+          { "title": "Environment", "value": "@{triggerBody()?['environment']}" },
+          { "title": "Branch", "value": "@{triggerBody()?['branch']}" },
+          { "title": "Commit", "value": "@{triggerBody()?['commit']}" },
+          { "title": "Status", "value": "@{triggerBody()?['status']}" },
+          { "title": "Time", "value": "@{triggerBody()?['timestamp']}" }
         ]
       }
     ],
@@ -45,7 +30,7 @@
       {
         "type": "Action.OpenUrl",
         "title": "View Pipeline",
-        "url": "${pipelineUrl}"
+        "url": "@{triggerBody()?['pipelineUrl']}"
       }
     ]
   }
