@@ -16,13 +16,21 @@ echo "=== Sending Teams Notification (${STATUS}) ==="
 
 # Build deployment info
 SERVICE_NAME="${BITBUCKET_REPO_SLUG:-unknown-service}"
+WORKSPACE="${BITBUCKET_WORKSPACE:-unknown}"
 ENVIRONMENT="${ENV_SUFFIX:-unknown}"
 ENVIRONMENT_UPPER=$(echo "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')
 BRANCH="${BITBUCKET_BRANCH:-unknown}"
-COMMIT="${BITBUCKET_COMMIT:0:7}"
+COMMIT_SHORT="${BITBUCKET_COMMIT:0:7}"
+COMMIT_FULL="${BITBUCKET_COMMIT:-unknown}"
 TRIGGERED_BY="${BITBUCKET_STEP_TRIGGERER_UUID:-pipeline}"
-PIPELINE_URL="https://bitbucket.org/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pipelines/results/${BITBUCKET_BUILD_NUMBER}"
+BUILD_NUMBER="${BITBUCKET_BUILD_NUMBER:-0}"
 TIMESTAMP=$(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S CT')
+
+# Build URLs
+REPO_URL="https://bitbucket.org/${WORKSPACE}/${SERVICE_NAME}"
+BRANCH_URL="https://bitbucket.org/${WORKSPACE}/${SERVICE_NAME}/branch/${BRANCH}"
+COMMIT_URL="https://bitbucket.org/${WORKSPACE}/${SERVICE_NAME}/commits/${COMMIT_FULL}"
+PIPELINE_URL="https://bitbucket.org/${WORKSPACE}/${SERVICE_NAME}/pipelines/results/${BUILD_NUMBER}"
 
 # Determine card content based on status
 case $STATUS in
@@ -63,9 +71,14 @@ PAYLOAD=$(cat << EOF
   "serviceName": "${SERVICE_NAME}",
   "environment": "${ENVIRONMENT_UPPER}",
   "branch": "${BRANCH}",
-  "commit": "${COMMIT}",
+  "commit": "${COMMIT_SHORT}",
   "status": "${FACT_STATUS}",
   "timestamp": "${TIMESTAMP}",
+  "buildNumber": "#${BUILD_NUMBER}",
+  "themeColor": "${COLOR}",
+  "repoUrl": "${REPO_URL}",
+  "branchUrl": "${BRANCH_URL}",
+  "commitUrl": "${COMMIT_URL}",
   "pipelineUrl": "${PIPELINE_URL}"
 }
 EOF
