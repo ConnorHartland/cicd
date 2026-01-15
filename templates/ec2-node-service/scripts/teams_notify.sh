@@ -48,52 +48,21 @@ case $STATUS in
     ;;
 esac
 
-# Build the payload for Power Automate Adaptive Card Templating
+# Build the data payload for Power Automate Adaptive Card Templating
+# Power Automate has the card template with ${fieldName} placeholders
+# This script sends only the data values to fill those placeholders
 PAYLOAD=$(cat << EOF
 {
-  "type": "message",
-  "attachments": [
-    {
-      "contentType": "application/vnd.microsoft.card.adaptive",
-      "contentUrl": null,
-      "content": {
-        "type": "AdaptiveCard",
-        "\$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "version": "1.4",
-        "body": [
-          {
-            "type": "TextBlock",
-            "size": "Medium",
-            "weight": "Bolder",
-            "text": "${TITLE}"
-          },
-          {
-            "type": "TextBlock",
-            "text": "${SERVICE_NAME}",
-            "isSubtle": true,
-            "spacing": "None"
-          },
-          {
-            "type": "FactSet",
-            "facts": [
-              { "title": "Environment", "value": "${ENVIRONMENT_UPPER}" },
-              { "title": "Branch", "value": "${BRANCH}" },
-              { "title": "Commit", "value": "${COMMIT}" },
-              { "title": "Status", "value": "${FACT_STATUS}" },
-              { "title": "Time", "value": "${TIMESTAMP}" }
-            ]
-          }
-        ],
-        "actions": [
-          {
-            "type": "Action.OpenUrl",
-            "title": "View Pipeline",
-            "url": "${PIPELINE_URL}"
-          }
-        ]
-      }
-    }
-  ]
+  "title": "${TITLE}",
+  "serviceName": "${SERVICE_NAME}",
+  "properties": [
+    { "key": "Environment", "value": "${ENVIRONMENT_UPPER}" },
+    { "key": "Branch", "value": "${BRANCH}" },
+    { "key": "Commit", "value": "${COMMIT}" },
+    { "key": "Status", "value": "${FACT_STATUS}" },
+    { "key": "Time", "value": "${TIMESTAMP}" }
+  ],
+  "pipelineUrl": "${PIPELINE_URL}"
 }
 EOF
 )
