@@ -2,6 +2,10 @@
 
 Bitbucket Pipeline template for Node.js applications deploying to EC2 via S3 artifact upload and ASG instance refresh.
 
+> **Full Documentation**: See [DOCUMENTATION.md](./DOCUMENTATION.md) for complete setup guide with diagrams.
+>
+> **Release Notes**: See [RELEASE_NOTES.md](../../RELEASE_NOTES.md) for version history and features.
+
 ## Branch Strategy (PR-Driven Deployments)
 
 ### Feature Development
