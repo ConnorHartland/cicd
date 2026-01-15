@@ -28,50 +28,38 @@ TIMESTAMP=$(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S CT')
 case $STATUS in
   start)
     TITLE="🚀 Deployment Started"
-    COLOR="0078D7"  # Blue
+    COLOR="accent"
     FACT_STATUS="In Progress"
     ;;
   success)
     TITLE="✅ Deployment Succeeded"
-    COLOR="00C851"  # Green
+    COLOR="good"
     FACT_STATUS="Completed"
     ;;
   failure)
     TITLE="❌ Deployment Failed"
-    COLOR="FF4444"  # Red
+    COLOR="attention"
     FACT_STATUS="Failed"
     ;;
   *)
     TITLE="📋 Deployment Update"
-    COLOR="808080"  # Gray
+    COLOR="default"
     FACT_STATUS="$STATUS"
     ;;
 esac
 
-# Build the Adaptive Card payload
+# Build the payload for Power Automate Adaptive Card
 PAYLOAD=$(cat << EOF
 {
-  "@type": "MessageCard",
-  "@context": "http://schema.org/extensions",
-  "themeColor": "${COLOR}",
-  "summary": "${TITLE} - ${SERVICE_NAME} to ${ENVIRONMENT_UPPER}",
-  "sections": [{
-    "activityTitle": "${TITLE}",
-    "activitySubtitle": "${SERVICE_NAME}",
-    "facts": [
-      { "name": "Environment", "value": "${ENVIRONMENT_UPPER}" },
-      { "name": "Branch", "value": "${BRANCH}" },
-      { "name": "Commit", "value": "${COMMIT}" },
-      { "name": "Status", "value": "${FACT_STATUS}" },
-      { "name": "Time", "value": "${TIMESTAMP}" }
-    ],
-    "markdown": true
-  }],
-  "potentialAction": [{
-    "@type": "OpenUri",
-    "name": "View Pipeline",
-    "targets": [{ "os": "default", "uri": "${PIPELINE_URL}" }]
-  }]
+  "title": "${TITLE}",
+  "serviceName": "${SERVICE_NAME}",
+  "environment": "${ENVIRONMENT_UPPER}",
+  "branch": "${BRANCH}",
+  "commit": "${COMMIT}",
+  "status": "${FACT_STATUS}",
+  "timestamp": "${TIMESTAMP}",
+  "pipelineUrl": "${PIPELINE_URL}",
+  "color": "${COLOR}"
 }
 EOF
 )

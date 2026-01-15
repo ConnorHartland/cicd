@@ -1,0 +1,44 @@
+  {
+    "type": "AdaptiveCard",
+    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+    "version": "1.4",
+    "body": [
+      {
+        "type": "Container",
+        "style": "@{triggerBody()?['color']}",
+        "items": [
+          {
+            "type": "TextBlock",
+            "text": "@{triggerBody()?['title']}",
+            "weight": "Bolder",
+            "size": "Medium"
+          },
+          {
+            "type": "TextBlock",
+            "text": "@{triggerBody()?['serviceName']}",
+            "spacing": "None",
+            "isSubtle": true
+          }
+        ],
+        "bleed": true,
+        "padding": "Default"
+      },
+      {
+        "type": "FactSet",
+        "facts": [
+          { "title": "Environment", "value": "@{triggerBody()?['environment']}" },
+          { "title": "Branch", "value": "@{triggerBody()?['branch']}" },
+          { "title": "Commit", "value": "@{triggerBody()?['commit']}" },
+          { "title": "Status", "value": "@{triggerBody()?['status']}" },
+          { "title": "Time", "value": "@{triggerBody()?['timestamp']}" }
+        ]
+      }
+    ],
+    "actions": [
+      {
+        "type": "Action.OpenUrl",
+        "title": "View Pipeline",
+        "url": "@{triggerBody()?['pipelineUrl']}"
+      }
+    ]
+  }
