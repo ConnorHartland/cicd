@@ -48,18 +48,52 @@ case $STATUS in
     ;;
 esac
 
-# Build the payload for Power Automate Adaptive Card
+# Build the payload for Power Automate Adaptive Card Templating
 PAYLOAD=$(cat << EOF
 {
-  "title": "${TITLE}",
-  "serviceName": "${SERVICE_NAME}",
-  "environment": "${ENVIRONMENT_UPPER}",
-  "branch": "${BRANCH}",
-  "commit": "${COMMIT}",
-  "status": "${FACT_STATUS}",
-  "timestamp": "${TIMESTAMP}",
-  "pipelineUrl": "${PIPELINE_URL}",
-  "color": "${COLOR}"
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "contentUrl": null,
+      "content": {
+        "type": "AdaptiveCard",
+        "\$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "version": "1.4",
+        "body": [
+          {
+            "type": "TextBlock",
+            "size": "Medium",
+            "weight": "Bolder",
+            "text": "${TITLE}"
+          },
+          {
+            "type": "TextBlock",
+            "text": "${SERVICE_NAME}",
+            "isSubtle": true,
+            "spacing": "None"
+          },
+          {
+            "type": "FactSet",
+            "facts": [
+              { "title": "Environment", "value": "${ENVIRONMENT_UPPER}" },
+              { "title": "Branch", "value": "${BRANCH}" },
+              { "title": "Commit", "value": "${COMMIT}" },
+              { "title": "Status", "value": "${FACT_STATUS}" },
+              { "title": "Time", "value": "${TIMESTAMP}" }
+            ]
+          }
+        ],
+        "actions": [
+          {
+            "type": "Action.OpenUrl",
+            "title": "View Pipeline",
+            "url": "${PIPELINE_URL}"
+          }
+        ]
+      }
+    }
+  ]
 }
 EOF
 )
