@@ -48,7 +48,6 @@ definitions:
         artifacts:
           - build*.zip
           - release-report.json
-          - release-report.html
         runs-on:
           - self.hosted
           - linux.shell

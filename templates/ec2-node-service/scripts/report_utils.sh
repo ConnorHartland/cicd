@@ -179,10 +179,49 @@ post_to_pr() {
 }
 
 #######################################
-# Get pipeline artifacts URL
+# Get git commit summary (commits in this branch not in main)
 #######################################
-get_artifacts_url() {
-  echo "https://bitbucket.org/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pipelines/results/${BITBUCKET_BUILD_NUMBER}"
+get_git_summary() {
+  local limit=${1:-20}
+  GIT_COMMITS=""
+  GIT_COMMITS_JSON="[]"
+
+  # Try to get commits since branching from main/master
+  local base_branch=""
+  if git rev-parse --verify origin/main >/dev/null 2>&1; then
+    base_branch="origin/main"
+  elif git rev-parse --verify origin/master >/dev/null 2>&1; then
+    base_branch="origin/master"
+  elif git rev-parse --verify main >/dev/null 2>&1; then
+    base_branch="main"
+  elif git rev-parse --verify master >/dev/null 2>&1; then
+    base_branch="master"
+  fi
+
+  if [ -n "$base_branch" ]; then
+    # Get commits since branching from main
+    GIT_COMMITS=$(git log "${base_branch}..HEAD" --pretty=format:"%h|%s|%an" -n "$limit" 2>/dev/null || true)
+  fi
+
+  # Fallback to recent commits if no base branch or no commits found
+  if [ -z "$GIT_COMMITS" ]; then
+    GIT_COMMITS=$(git log --pretty=format:"%h|%s|%an" -n "$limit" 2>/dev/null || true)
+  fi
+
+  # Build JSON array
+  if [ -n "$GIT_COMMITS" ]; then
+    GIT_COMMITS_JSON=$(echo "$GIT_COMMITS" | jq -R -s '
+      split("\n") | map(select(length > 0)) | map(
+        split("|") | {
+          sha: .[0],
+          message: .[1],
+          author: .[2]
+        }
+      )
+    ' 2>/dev/null || echo "[]")
+  fi
+
+  export GIT_COMMITS GIT_COMMITS_JSON
 }
 
 #######################################
