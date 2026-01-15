@@ -26,22 +26,12 @@ Enterprise-grade Bitbucket Pipelines template for Node.js microservices deployin
 
 ## Pipeline Flow
 
-```mermaid
-flowchart LR
-    A[PR Created] --> B[Build & Test]
-    B --> C[Security Scan]
-    C --> D[Deploy Test]
-    D --> E[Deploy Staging]
-    E --> F[Deploy Prod]
-    F --> G[Tag Release]
+> **Diagram:** See `diagrams/pipeline-flow.drawio`
 
-    style A fill:#e1f5fe
-    style B fill:#e1f5fe
-    style C fill:#e1f5fe
-    style D fill:#c8e6c9
-    style E fill:#fff9c4
-    style F fill:#ffcdd2
-    style G fill:#e1f5fe
+```
+PR Created → Build & Test → Security Scan → Deploy Test → Deploy Staging → Deploy Prod → Tag Release
+     │            │              │              │               │              │            │
+   (auto)      (auto)         (auto)         (auto)         (manual)       (manual)      (auto)
 ```
 
 ---
@@ -81,34 +71,20 @@ flowchart LR
 
 ## Integration Architecture
 
-```mermaid
-flowchart TB
-    subgraph Source["Source Control"]
-        BB[Bitbucket]
-    end
+> **Diagram:** See `diagrams/integration-architecture.drawio`
 
-    subgraph CI["CI Pipeline"]
-        BUILD[Build & Test]
-        SONAR[SonarQube]
-        NPM[npm audit]
-        SNYK[Snyk]
-    end
-
-    subgraph CD["CD Pipeline"]
-        S3[S3 Upload]
-        ASG[ASG Refresh]
-        SMOKE[Smoke Tests]
-    end
-
-    subgraph Notify["Notifications"]
-        TEAMS[MS Teams]
-    end
-
-    BB --> BUILD
-    BUILD --> SONAR & NPM & SNYK
-    BUILD --> S3 --> ASG --> SMOKE
-    ASG --> TEAMS
-    SMOKE --> TEAMS
+```
+┌──────────────┐     ┌─────────────────────────────────┐     ┌─────────────────────┐     ┌──────────────┐
+│   Bitbucket  │────►│         CI Pipeline             │────►│    CD Pipeline      │────►│  MS Teams    │
+│              │     │  Build & Test                   │     │  S3 Upload          │     │ Notifications│
+│              │     │  SonarQube / npm audit / Snyk   │     │  ASG Refresh        │     │              │
+└──────────────┘     └─────────────────────────────────┘     │  Smoke Tests        │     └──────────────┘
+                                    │                         └─────────────────────┘
+                                    ▼
+                          ┌─────────────────┐
+                          │  PR Reports     │
+                          │  Release Report │
+                          └─────────────────┘
 ```
 
 ---
@@ -212,21 +188,30 @@ Full project security snapshot with:
 
 ## Deployment Verification
 
-```mermaid
-flowchart TD
-    START[Deploy Complete] --> POLL[Poll ASG Status]
-    POLL -->|In Progress| POLL
-    POLL -->|Success| CHECK{Smoke Tests?}
-    POLL -->|Failed| FAIL[Pipeline Fails]
+> **Diagram:** See `diagrams/deployment-verification.drawio`
 
-    CHECK -->|Yes| SMOKE[Run Smoke Tests]
-    CHECK -->|No| PASS[Pipeline Passes]
-
-    SMOKE -->|Pass| PASS
-    SMOKE -->|Fail| FAIL
-
-    PASS --> NOTIFY[Teams: Success]
-    FAIL --> ALERT[Teams: Failed]
+```
+Deploy Complete
+      │
+      ▼
+Poll ASG Status ◄───┐
+      │             │ (In Progress)
+      ▼             │
+ ASG Status? ───────┘
+      │
+      ├── Failed ──────► Pipeline Fails ──► Teams: Failed
+      │
+      └── Success
+            │
+            ▼
+    Smoke Tests Configured?
+            │
+            ├── No ───► Pipeline Passes ──► Teams: Success
+            │
+            └── Yes ──► Run Smoke Tests
+                              │
+                              ├── Pass ──► Pipeline Passes
+                              └── Fail ──► Pipeline Fails
 ```
 
 ---

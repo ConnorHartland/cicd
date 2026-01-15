@@ -18,6 +18,22 @@ Enterprise-grade Bitbucket Pipeline template for Node.js microservices deploying
 
 ---
 
+## Diagrams
+
+All diagrams are available as draw.io files in the `/diagrams` folder. These can be:
+- Imported directly into Confluence using the draw.io macro
+- Opened in [diagrams.net](https://app.diagrams.net) for editing
+- Exported as PNG/SVG for embedding
+
+| Diagram | File | Description |
+|---------|------|-------------|
+| Pipeline Flow | `diagrams/pipeline-flow.drawio` | Release pipeline stages |
+| Integration Architecture | `diagrams/integration-architecture.drawio` | System components and data flow |
+| Deployment Verification | `diagrams/deployment-verification.drawio` | ASG refresh and smoke test flow |
+| Branch Strategy | `diagrams/branch-strategy.drawio` | Git branching and environment mapping |
+
+---
+
 ## Overview
 
 This template provides a complete CI/CD solution for Node.js services with:
@@ -47,178 +63,84 @@ This template provides a complete CI/CD solution for Node.js services with:
 
 ## Architecture
 
-### Integration Ecosystem
+> **Diagram:** See `diagrams/integration-architecture.drawio`
 
-```mermaid
-flowchart TB
-    subgraph Trigger["Trigger"]
-        BB[Bitbucket Push/PR]
-    end
+### Component Overview
 
-    subgraph CI["Continuous Integration"]
-        BUILD[Build & Test]
-        SONAR[SonarQube Analysis]
-        NPM[npm audit]
-        SNYK[Snyk Scan]
-    end
+| Component | Purpose |
+|-----------|---------|
+| **Bitbucket** | Source control, PR management, pipeline triggers |
+| **SonarQube** | Static code analysis, quality gates |
+| **npm audit** | Dependency vulnerability scanning |
+| **Snyk** | Security vulnerability detection |
+| **AWS S3** | Build artifact storage |
+| **AWS ASG** | Auto Scaling Group instance refresh |
+| **MS Teams** | Deployment notifications |
 
-    subgraph Reports["Reporting"]
-        PR_REPORT[PR Security Report]
-        REL_REPORT[Release Report]
-    end
+### Data Flow
 
-    subgraph CD["Continuous Deployment"]
-        S3[S3 Artifact Upload]
-        ASG[ASG Instance Refresh]
-        VERIFY[Deployment Verification]
-        SMOKE[Smoke Tests]
-    end
-
-    subgraph Notify["Notifications"]
-        TEAMS[Microsoft Teams]
-    end
-
-    BB --> BUILD
-    BUILD --> SONAR & NPM & SNYK
-    SONAR & NPM & SNYK --> PR_REPORT
-    SONAR & NPM & SNYK --> REL_REPORT
-
-    BUILD --> S3
-    S3 --> ASG
-    ASG --> VERIFY
-    VERIFY --> SMOKE
-
-    ASG --> TEAMS
-    VERIFY --> TEAMS
 ```
-
-### Deployment Flow
-
-```mermaid
-sequenceDiagram
-    participant Dev as Developer
-    participant BB as Bitbucket
-    participant CI as CI Pipeline
-    participant S3 as AWS S3
-    participant ASG as AWS ASG
-    participant EC2 as EC2 Instances
-    participant Teams as MS Teams
-
-    Dev->>BB: Push to release branch
-    Dev->>BB: Open PR to main
-    BB->>CI: Trigger pipeline
-    CI->>CI: Build & Test
-    CI->>CI: Security Scans
-    CI->>BB: Post PR Report
-    CI->>S3: Upload artifact
-    CI->>Teams: Deployment Started
-    CI->>ASG: Start Instance Refresh
-    ASG->>EC2: Rolling update
-    EC2->>EC2: Pull from S3, restart
-    CI->>ASG: Poll refresh status
-    ASG-->>CI: Refresh complete
-    CI->>Teams: Deployment Succeeded
-    CI->>BB: Pipeline success
+Bitbucket Push/PR
+    │
+    ▼
+Build & Test ──► Security Scans ──► PR Report
+    │                                   │
+    ▼                                   ▼
+S3 Upload ──► ASG Refresh ──► Verification ──► Teams Notification
 ```
 
 ---
 
 ## Pipeline Flow
 
+> **Diagram:** See `diagrams/pipeline-flow.drawio`
+
 ### Release Pipeline Stages
 
-```mermaid
-flowchart LR
-    subgraph Auto["Automatic"]
-        A[PR Created] --> B[Build & Test]
-        B --> C[Security Scan]
-        C --> D[PR Report]
-        D --> E[Deploy to Test]
-    end
-
-    subgraph Manual["Manual Approval"]
-        E --> F[Deploy to Staging]
-        F --> G[Deploy to Production]
-    end
-
-    subgraph PostMerge["After Merge"]
-        G --> H[Merge PR]
-        H --> I[Create Version Tag]
-    end
-
-    style A fill:#e1f5fe
-    style B fill:#e1f5fe
-    style C fill:#e1f5fe
-    style D fill:#e1f5fe
-    style E fill:#e1f5fe
-    style F fill:#fff3e0
-    style G fill:#fff3e0
-    style H fill:#e8f5e9
-    style I fill:#e8f5e9
-```
+| Stage | Type | Description |
+|-------|------|-------------|
+| PR Created | Auto | Pipeline triggered |
+| Build & Test | Auto | npm ci, lint, test, build |
+| Security Scan | Auto | SonarQube, npm audit, Snyk |
+| PR Report | Auto | Security report posted to PR |
+| Deploy to Test | Auto | Automatic deployment |
+| Deploy to Staging | Manual | Requires approval |
+| Deploy to Production | Manual | Requires approval |
+| Tag Release | Auto | On merge to main |
 
 ### Deployment Step Detail
 
-```mermaid
-flowchart TD
-    START[Start Deploy] --> NOTIFY1[Teams: Started]
-    NOTIFY1 --> KAFKA[Setup Kafka Topics]
-    KAFKA --> PRISMA[Run Prisma Migrations]
-    PRISMA --> UPLOAD[Upload to S3]
-    UPLOAD --> REFRESH[Trigger ASG Refresh]
-    REFRESH --> POLL{Poll ASG Status}
+> **Diagram:** See `diagrams/deployment-verification.drawio`
 
-    POLL -->|In Progress| POLL
-    POLL -->|Success| SMOKE{Smoke Tests?}
-    POLL -->|Failed| FAIL[Pipeline Failed]
-
-    SMOKE -->|Configured| RUN_SMOKE[Run Smoke Tests]
-    SMOKE -->|Not Configured| SUCCESS
-
-    RUN_SMOKE -->|Pass| SUCCESS[Pipeline Success]
-    RUN_SMOKE -->|Fail| FAIL
-
-    SUCCESS --> NOTIFY2[Teams: Succeeded]
-    FAIL --> NOTIFY3[Teams: Failed]
-
-    style START fill:#e3f2fd
-    style SUCCESS fill:#c8e6c9
-    style FAIL fill:#ffcdd2
+```
+Deploy Complete
+    │
+    ▼
+Poll ASG Status ◄──┐
+    │              │ (In Progress)
+    ▼              │
+ASG Status? ───────┘
+    │
+    ├── Failed ──► Pipeline Failed ──► Teams: Failed
+    │
+    └── Success
+          │
+          ▼
+    Smoke Tests Configured?
+          │
+          ├── No ──► Pipeline Success ──► Teams: Success
+          │
+          └── Yes ──► Run Smoke Tests
+                          │
+                          ├── Pass ──► Pipeline Success
+                          └── Fail ──► Pipeline Failed
 ```
 
 ---
 
 ## Branch Strategy
 
-### Git Flow Visualization
-
-```mermaid
-gitGraph
-    commit id: "initial"
-    branch develop
-    checkout develop
-    commit id: "feature work"
-
-    branch feature/login
-    commit id: "add login"
-    commit id: "add tests"
-    checkout develop
-    merge feature/login
-
-    branch release/2.11.0
-    commit id: "prep release"
-    checkout main
-    merge release/2.11.0 tag: "v2.11.0"
-
-    checkout develop
-    merge main
-
-    checkout main
-    branch hotfix/critical
-    commit id: "emergency fix"
-    checkout main
-    merge hotfix/critical tag: "v2.11.1"
-```
+> **Diagram:** See `diagrams/branch-strategy.drawio`
 
 ### Branch Trigger Matrix
 
@@ -231,32 +153,13 @@ gitGraph
 
 ### Environment Progression
 
-```mermaid
-flowchart LR
-    subgraph Development
-        DEV[Dev Environment]
-    end
-
-    subgraph Testing
-        TEST[Test Environment]
-    end
-
-    subgraph PreProd
-        QA[Staging/QA]
-    end
-
-    subgraph Production
-        PROD[Production]
-    end
-
-    DEV -->|"Manual Deploy"| TEST
-    TEST -->|"Auto on PR"| QA
-    QA -->|"Manual Approval"| PROD
-
-    style DEV fill:#bbdefb
-    style TEST fill:#c8e6c9
-    style QA fill:#fff9c4
-    style PROD fill:#ffcdd2
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│     Dev     │───►│    Test     │───►│   Staging   │───►│ Production  │
+│ Environment │    │ Environment │    │ Environment │    │ Environment │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+      │                  │                  │                  │
+  Manual Deploy      Auto on PR       Manual Approval    Manual Approval
 ```
 
 ---
@@ -474,16 +377,10 @@ Set in **Repository Settings → Deployments → [Environment]**:
 
 ### Scan Pipeline
 
-```mermaid
-flowchart LR
-    BUILD[npm ci] --> LINT[Lint]
-    LINT --> TEST[Test + Coverage]
-    TEST --> SONAR[SonarQube]
-    TEST --> NPM[npm audit]
-    TEST --> SNYK[Snyk]
-
-    SONAR & NPM & SNYK --> REPORT[Generate Report]
-    REPORT --> PR[Post to PR]
+```
+npm ci ──► Lint ──► Test + Coverage ──► SonarQube ──┐
+                                        npm audit ──┼──► Generate Report ──► Post to PR
+                                        Snyk ───────┘
 ```
 
 ### Report Status Logic
