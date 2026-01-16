@@ -1,0 +1,395 @@
+definitions:
+  steps:
+    - step: &build
+        name: Build & Test
+        script:
+          # ===================
+          # INSTALL DEPENDENCIES
+          # ===================
+          - echo "=== Installing Server Dependencies ==="
+          - npm ci --silent
+
+          - echo "=== Installing Client Dependencies ==="
+          - cd client && npm ci --silent && cd ..
+
+          # ===================
+          # LINT
+          # ===================
+          - echo "=== Linting Server ==="
+          - npm run lint
+
+          - echo "=== Linting Client ==="
+          - cd client && npm run lint && cd ..
+
+          # ===================
+          # TEST
+          # ===================
+          - echo "=== Testing Server ==="
+          - npm run test
+
+          - echo "=== Testing Client ==="
+          - cd client && npm run test && cd ..
+
+          # ===================
+          # BUILD (server only, client built per-env)
+          # ===================
+          - echo "=== Building Server ==="
+          - tsc && cp src/utils/bubbleStatus.csv build/utils
+
+          # ===================
+          # SONARQUBE ANALYSIS
+          # ===================
+          - |
+            if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
+              echo "=== Running SonarQube Analysis ==="
+              sonar-scanner \
+                -Dsonar.host.url=$SONAR_HOST_URL \
+                -Dsonar.token=$SONAR_TOKEN
+            fi
+
+          # ===================
+          # PR REPORT
+          # ===================
+          - |
+            if [ -n "$BITBUCKET_PR_ID" ]; then
+              ./scripts/pr_report.sh
+            fi
+
+          # ===================
+          # PACKAGE ARTIFACT
+          # ===================
+          - echo "=== Packaging Build Artifact (server only, client built per-env) ==="
+          - zip -rq build_${BITBUCKET_COMMIT}.zip build node_modules package.json package-lock.json
+        artifacts:
+          - build*.zip
+        runs-on:
+          - self.hosted
+          - linux.shell
+          - node22
+
+    - step: &build-release
+        name: Build & Test (Release)
+        script:
+          # ===================
+          # INSTALL DEPENDENCIES
+          # ===================
+          - echo "=== Installing Server Dependencies ==="
+          - npm ci --silent
+
+          - echo "=== Installing Client Dependencies ==="
+          - cd client && npm ci --silent && cd ..
+
+          # ===================
+          # LINT
+          # ===================
+          - echo "=== Linting Server ==="
+          - npm run lint
+
+          - echo "=== Linting Client ==="
+          - cd client && npm run lint && cd ..
+
+          # ===================
+          # TEST
+          # ===================
+          - echo "=== Testing Server ==="
+          - npm run test
+
+          - echo "=== Testing Client ==="
+          - cd client && npm run test && cd ..
+
+          # ===================
+          # BUILD (server only, client built per-env)
+          # ===================
+          - echo "=== Building Server ==="
+          - tsc && cp src/utils/bubbleStatus.csv build/utils
+
+          # ===================
+          # SONARQUBE ANALYSIS (with version)
+          # ===================
+          - |
+            if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
+              VERSION=${BITBUCKET_BRANCH#release/}
+              echo "=== Running SonarQube Analysis (v${VERSION}) ==="
+              sonar-scanner \
+                -Dsonar.host.url=$SONAR_HOST_URL \
+                -Dsonar.token=$SONAR_TOKEN \
+                -Dsonar.projectVersion=$VERSION
+            fi
+
+          # ===================
+          # RELEASE REPORT
+          # ===================
+          - ./scripts/release_report.sh
+
+          # ===================
+          # PACKAGE ARTIFACT
+          # ===================
+          - echo "=== Packaging Build Artifact (server only, client built per-env) ==="
+          - zip -rq build_${BITBUCKET_COMMIT}.zip build node_modules package.json package-lock.json
+        artifacts:
+          - build*.zip
+          - release-report.json
+        runs-on:
+          - self.hosted
+          - linux.shell
+          - node22
+
+    - step: &predeploy-nonprod
+        name: Pre-deploy
+        script:
+          - ./scripts/setup_kafka.sh $ENV_SUFFIX $ALLOW_TOPIC_RECREATE
+          - ./scripts/prisma_migration.sh $SERVICE_NAME $ENV_SUFFIX $SEED
+        runs-on:
+          - self.hosted
+          - linux.shell
+          - node22
+
+    - step: &predeploy-prod
+        name: Pre-deploy (Production)
+        script:
+          - ./scripts/setup_kafka.sh $ENV_SUFFIX
+          - ./scripts/prisma_migration.sh $SERVICE_NAME $ENV_SUFFIX
+        runs-on:
+          - self.hosted
+          - linux.shell
+          - node22.prod
+
+    - step: &deploy
+        name: Deploy to AWS
+        image: amazon/aws-cli
+        script:
+          - ./scripts/teams_notify.sh start
+          - |
+            export AWS_ACCESS_KEY_ID=$(eval echo \$AWS_ACCESS_KEY_ID_$AWS_SUFFIX)
+            export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
+          - aws s3 rm s3://$S3_BUCKET --recursive --exclude "*.env" --quiet
+          - aws s3 cp build_${BITBUCKET_COMMIT}.zip s3://$S3_BUCKET/build.zip --quiet
+          - |
+            PREFERENCES="{\"InstanceWarmup\": ${INSTANCE_WARMUP:-300}}"
+            aws autoscaling start-instance-refresh --region us-east-1 \
+              --auto-scaling-group-name $ASG_NAME \
+              --preferences "$PREFERENCES"
+
+    - step: &verify-deploy
+        name: Verify Deployment
+        image: amazon/aws-cli
+        script:
+          - |
+            export AWS_ACCESS_KEY_ID=$(eval echo \$AWS_ACCESS_KEY_ID_$AWS_SUFFIX)
+            export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
+          - |
+            if ./scripts/verify_deploy.sh; then
+              ./scripts/teams_notify.sh success
+            else
+              ./scripts/teams_notify.sh failure
+              exit 1
+            fi
+          - ./scripts/newrelic_deploy.sh
+
+    - step: &build-client
+        name: Build Client
+        script:
+          # Set up AWS credentials for this environment
+          - |
+            export AWS_ACCESS_KEY_ID=$(eval echo \$AWS_ACCESS_KEY_ID_$AWS_SUFFIX)
+            export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
+          # Copy .env from S3
+          - echo "=== Copying .env from S3 ==="
+          - aws s3 cp s3://$S3_BUCKET/client/.env client/.env --quiet
+          # Install dependencies and build
+          - echo "=== Installing Client Dependencies ==="
+          - cd client && npm ci --silent
+          - echo "=== Building Client ==="
+          - npm run build
+          - cd ..
+          # Update artifact with new client build
+          - echo "=== Updating Artifact ==="
+          - unzip -q build_${BITBUCKET_COMMIT}.zip -d _artifact
+          - |
+            if [ -d "client/build" ]; then
+              cp -r client/build _artifact/build/client
+            elif [ -d "client/dist" ]; then
+              cp -r client/dist _artifact/build/client
+            else
+              echo "ERROR: Client build directory not found"
+              exit 1
+            fi
+          - rm build_${BITBUCKET_COMMIT}.zip
+          - cd _artifact && zip -rq ../build_${BITBUCKET_COMMIT}.zip . && cd ..
+          - rm -rf _artifact
+        artifacts:
+          - build*.zip
+        runs-on:
+          - self.hosted
+          - linux.shell
+          - node22
+
+    - step: &tag-release
+        name: Tag Release
+        script:
+          - |
+            # Extract version from the merge commit message (expects "release/X.X.X" in message)
+            VERSION=$(git log -1 --pretty=%B | grep -oE 'release/[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/release\///' || echo "")
+            if [ -z "$VERSION" ]; then
+              # Fallback: try to find version pattern directly
+              VERSION=$(git log -1 --pretty=%B | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
+            fi
+            if [ -n "$VERSION" ]; then
+              echo "Tagging release v${VERSION}"
+              git tag -a "v${VERSION}" -m "Release ${VERSION}"
+              git push origin "v${VERSION}"
+            else
+              echo "No version found in commit message, skipping tag"
+            fi
+
+pipelines:
+  # ===================
+  # PULL REQUESTS
+  # ===================
+  pull-requests:
+    # All PRs get basic CI (including hotfix/*)
+    "**":
+      - step: *build
+
+    # PRs from release/* branches get full release pipeline
+    "release/*":
+      - step: *build-release
+      - stage:
+          name: Deploy to Test
+          deployment: Test
+          steps:
+            - step: *build-client
+            - step: *predeploy-nonprod
+            - step: *deploy
+            - step: *verify-deploy
+      - stage:
+          name: Deploy to Staging
+          deployment: Staging
+          trigger: manual
+          steps:
+            - step: *build-client
+            - step: *predeploy-nonprod
+            - step: *deploy
+            - step: *verify-deploy
+      - stage:
+          name: Deploy to Production
+          deployment: Production
+          trigger: manual
+          steps:
+            - step: *build-client
+            - step: *predeploy-prod
+            - step: *deploy
+            - step: *verify-deploy
+
+  # ===================
+  # BRANCH PUSHES
+  # ===================
+  branches:
+    # Feature branches - CI only (use deploy-to-develop custom pipeline to deploy)
+    feature/*:
+      - step: *build
+
+    # Main branch - tag release after PR merge
+    main:
+      - step: *tag-release
+
+  # ===================
+  # CUSTOM PIPELINES
+  # ===================
+  custom:
+    deploy-to-develop:
+      - variables:
+          - name: SEED
+            default: "false"
+            allowed-values:
+              - "true"
+              - "false"
+      - step: *build
+      - stage:
+          name: Deploy to Develop
+          deployment: Develop
+          steps:
+            - step: *build-client
+            - step: *predeploy-nonprod
+            - step: *deploy
+            - step: *verify-deploy
+
+    deploy-to-test:
+      - variables:
+          - name: SEED
+            default: "false"
+            allowed-values:
+              - "true"
+              - "false"
+      - step: *build
+      - stage:
+          name: Deploy to Test
+          deployment: Test
+          steps:
+            - step: *build-client
+            - step: *predeploy-nonprod
+            - step: *deploy
+            - step: *verify-deploy
+
+    deploy-hotfix:
+      - step: *build-release
+      - stage:
+          name: Deploy to Production
+          deployment: Production
+          steps:
+            - step: *build-client
+            - step: *predeploy-prod
+            - step: *deploy
+            - step: *verify-deploy
+
+    setup-kafka:
+      - variables:
+          - name: ENV_SUFFIX
+            default: "dev"
+            allowed-values:
+              - "dev"
+              - "test"
+              - "qa"
+          - name: ALLOW_TOPIC_RECREATE
+            default: "false"
+            allowed-values:
+              - "true"
+              - "false"
+      - step:
+          name: Setup Kafka
+          script:
+            - npm ci
+            - ./scripts/setup_kafka.sh $ENV_SUFFIX $ALLOW_TOPIC_RECREATE
+          runs-on:
+            - self.hosted
+            - linux.shell
+            - node22
+
+    docker-build:
+      - step:
+          name: Build & Push Docker Image
+          image: docker:24-dind
+          services:
+            - docker
+          script:
+            - |
+              # Generate tags
+              SHORT_SHA=${BITBUCKET_COMMIT:0:7}
+              BRANCH_TAG=$(echo "$BITBUCKET_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]')
+
+              echo "Building Docker image..."
+              echo "  Repository: ${DOCKER_REPO}"
+              echo "  Tags: ${SHORT_SHA}, ${BRANCH_TAG}"
+            - |
+              # Build the image
+              docker build -t ${DOCKER_REPO}:${BITBUCKET_COMMIT:0:7} \
+                           -t ${DOCKER_REPO}:$(echo "$BITBUCKET_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]') \
+                           .
+            - |
+              # Login to Docker Hub
+              echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
+            - |
+              # Push tags
+              docker push ${DOCKER_REPO}:${BITBUCKET_COMMIT:0:7}
+              docker push ${DOCKER_REPO}:$(echo "$BITBUCKET_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]')
+            - echo "Docker image pushed successfully"
