@@ -242,6 +242,11 @@ definitions:
               echo "No version found in commit message, skipping tag"
             fi
 
+    - step: &merge-pr
+        name: Merge to Main
+        script:
+          - ./scripts/merge_pr.sh
+
 pipelines:
   # ===================
   # PULL REQUESTS
@@ -280,6 +285,7 @@ pipelines:
             - step: *predeploy-prod
             - step: *deploy
             - step: *verify-deploy
+      - step: *merge-pr
 
   # ===================
   # BRANCH PUSHES

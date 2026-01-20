@@ -1,0 +1,154 @@
+version: 0.2
+
+# AWS CodeBuild buildspec for EC2 Node.js Service
+# Mirrors Bitbucket Pipeline functionality for AWS CodePipeline integration
+
+env:
+  variables:
+    NODE_VERSION: "22"
+  parameter-store:
+    SONAR_TOKEN: /codebuild/sonar/token
+    SONAR_HOST_URL: /codebuild/sonar/host
+    NEWRELIC_API_KEY: /codebuild/newrelic/api-key
+    TEAMS_WEBHOOK_URL: /codebuild/teams/webhook
+  secrets-manager:
+    AWS_DEPLOY_ACCESS_KEY: "codebuild/aws-deploy:access_key_id"
+    AWS_DEPLOY_SECRET_KEY: "codebuild/aws-deploy:secret_access_key"
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+    commands:
+      - echo "Installing dependencies..."
+      - npm ci --silent
+      - |
+        # Install sonar-scanner if not available
+        if ! command -v sonar-scanner &> /dev/null; then
+          wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+          unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
+          export PATH=$PATH:$(pwd)/sonar-scanner-5.0.1.3006-linux/bin
+        fi
+
+  pre_build:
+    commands:
+      - echo "Running linting and tests..."
+      - npm run lint
+      - npm run test
+      - |
+        # Determine build type (PR vs Release)
+        if [ "$CODEBUILD_WEBHOOK_TRIGGER" = "pr/*" ]; then
+          export BUILD_TYPE="pr"
+          export PR_ID=$(echo $CODEBUILD_WEBHOOK_TRIGGER | cut -d'/' -f2)
+        elif [[ "$CODEBUILD_WEBHOOK_HEAD_REF" == *"release/"* ]]; then
+          export BUILD_TYPE="release"
+          export VERSION=$(echo $CODEBUILD_WEBHOOK_HEAD_REF | sed 's/.*release\///')
+        else
+          export BUILD_TYPE="standard"
+        fi
+        echo "Build type: $BUILD_TYPE"
+
+  build:
+    commands:
+      - echo "Building application..."
+      - npm run build
+      - |
+        # Run SonarQube analysis
+        if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
+          if [ "$BUILD_TYPE" = "release" ]; then
+            echo "Running SonarQube analysis for release $VERSION"
+            sonar-scanner \
+              -Dsonar.host.url=$SONAR_HOST_URL \
+              -Dsonar.token=$SONAR_TOKEN \
+              -Dsonar.projectVersion=$VERSION
+          else
+            echo "Running SonarQube analysis"
+            sonar-scanner \
+              -Dsonar.host.url=$SONAR_HOST_URL \
+              -Dsonar.token=$SONAR_TOKEN
+          fi
+        fi
+      - |
+        # Run security reports
+        if [ "$BUILD_TYPE" = "pr" ]; then
+          echo "Generating PR security report..."
+          ./scripts/pr_report.sh
+        elif [ "$BUILD_TYPE" = "release" ]; then
+          echo "Generating release security report..."
+          ./scripts/release_report.sh
+        fi
+      - |
+        # Create deployment artifact
+        echo "Creating deployment artifact..."
+        zip -rq build_${CODEBUILD_RESOLVED_SOURCE_VERSION}.zip dist node_modules package.json package-lock.json
+
+  post_build:
+    commands:
+      - |
+        # Only deploy if this is a deployment build (not just CI)
+        if [ "$DEPLOY_ENABLED" = "true" ]; then
+          echo "Starting deployment process..."
+          
+          # Pre-deployment tasks
+          if [ "$ENVIRONMENT" != "prod" ]; then
+            echo "Running pre-deployment tasks for $ENVIRONMENT..."
+            ./scripts/setup_kafka.sh $ENV_SUFFIX $ALLOW_TOPIC_RECREATE
+            ./scripts/prisma_migration.sh $SERVICE_NAME $ENV_SUFFIX $SEED
+          else
+            echo "Running pre-deployment tasks for production..."
+            ./scripts/setup_kafka.sh $ENV_SUFFIX
+            ./scripts/prisma_migration.sh $SERVICE_NAME $ENV_SUFFIX
+          fi
+          
+          # Send Teams notification - deployment started
+          ./scripts/teams_notify.sh start
+          
+          # Upload to S3
+          echo "Uploading artifact to S3..."
+          export AWS_ACCESS_KEY_ID=$AWS_DEPLOY_ACCESS_KEY
+          export AWS_SECRET_ACCESS_KEY=$AWS_DEPLOY_SECRET_KEY
+          aws s3 rm s3://$S3_BUCKET --recursive --exclude "*.env" --quiet
+          aws s3 cp build_${CODEBUILD_RESOLVED_SOURCE_VERSION}.zip s3://$S3_BUCKET/build.zip --quiet
+          
+          # Trigger ASG refresh
+          echo "Triggering Auto Scaling Group refresh..."
+          PREFERENCES="{\"InstanceWarmup\": ${INSTANCE_WARMUP:-300}}"
+          aws autoscaling start-instance-refresh --region us-east-1 \
+            --auto-scaling-group-name $ASG_NAME \
+            --preferences "$PREFERENCES"
+          
+          # Verify deployment
+          echo "Verifying deployment..."
+          if ./scripts/verify_deploy.sh; then
+            echo "Deployment verified successfully"
+            ./scripts/teams_notify.sh success
+            ./scripts/newrelic_deploy.sh
+          else
+            echo "Deployment verification failed"
+            ./scripts/teams_notify.sh failure
+            exit 1
+          fi
+        else
+          echo "Deployment skipped (CI only)"
+        fi
+
+artifacts:
+  files:
+    - build_*.zip
+    - release-report.json
+  discard-paths: yes
+
+cache:
+  paths:
+    - 'node_modules/**/*'
+
+reports:
+  jest_reports:
+    files:
+      - 'coverage/clover.xml'
+    file-format: 'CLOVERXML'
+  
+  security_reports:
+    files:
+      - 'release-report.json'
+    file-format: 'JSON'
