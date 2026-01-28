@@ -19,7 +19,7 @@ echo ""
 
 # Iterate through each group
 for group in $(yq '.groups | keys | .[]' "$CONFIG_FILE"); do
-    folder=$(yq ".groups.${group}.folder" "$CONFIG_FILE")
+    folder=$(yq '.groups["'"$group"'"].folder' "$CONFIG_FILE")
     full_path="${BASE_PATH}/${folder}"
 
     echo "--- Group: $group ---"
@@ -29,11 +29,15 @@ for group in $(yq '.groups | keys | .[]' "$CONFIG_FILE"); do
     mkdir -p "$full_path"
 
     # Get repo count for this group
-    repo_count=$(yq ".groups.${group}.repos | length" "$CONFIG_FILE")
+    repo_count=$(yq '.groups["'"$group"'"].repos | length' "$CONFIG_FILE")
 
     for i in $(seq 0 $((repo_count - 1))); do
-        repo_name=$(yq ".groups.${group}.repos[$i].name" "$CONFIG_FILE")
-        branch=$(yq ".groups.${group}.repos[$i].branch // \"$DEFAULT_BRANCH\"" "$CONFIG_FILE")
+        repo_name=$(yq '.groups["'"$group"'"].repos['"$i"'].name' "$CONFIG_FILE")
+        branch=$(yq '.groups["'"$group"'"].repos['"$i"'].branch' "$CONFIG_FILE")
+        # Handle null/empty branch - fall back to default
+        if [ "$branch" = "null" ] || [ -z "$branch" ]; then
+            branch="$DEFAULT_BRANCH"
+        fi
 
         repo_path="${full_path}/${repo_name}"
         repo_url="git@bitbucket.org:${WORKSPACE}/${repo_name}.git"
