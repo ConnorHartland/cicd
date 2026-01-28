@@ -1,30 +1,9 @@
-# Git Tool - Repository Configuration
-# Clone all repos: ./sync.sh
-# Each group clones to its specified folder
+# Repos to clone
+workspace: your-bitbucket-workspace
+folder: ~/repos
+branch: main
 
-settings:
-  workspace: your-bitbucket-workspace  # Bitbucket workspace/org name
-  base_path: ~/repos                   # Root folder for all clones
-  default_branch: main
-
-groups:
-  team1-services:
-    folder: api/services
-    repos:
-      - name: service1
-        branch: prod
-      - name: service2
-        branch: prod
-      - name: service3
-        branch: prod
-
-  common-packages:
-    folder: common/packages
-    repos:
-      - name: shared-utils
-      - name: common-types
-
-  team2-services:
-    folder: api/team2
-    repos:
-      - name: service-a
+repos:
+  - repo1
+  - repo2
+  - repo3
