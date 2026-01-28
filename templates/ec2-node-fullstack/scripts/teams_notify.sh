@@ -32,12 +32,17 @@ TRIGGER_TYPE=""
 DURATION=""
 
 # Fetch pipeline info from Bitbucket API
-if [ -n "$BITBUCKET_USERNAME" ] && [ -n "$BITBUCKET_APP_PASSWORD" ] && [ -n "$BITBUCKET_PIPELINE_UUID" ]; then
+if [ -n "$BITBUCKET_EMAIL" ] && [ -n "$BITBUCKET_API_TOKEN" ] && [ -n "$BITBUCKET_PIPELINE_UUID" ]; then
   echo "Fetching pipeline info from Bitbucket API..."
-  PIPELINE_INFO=$(curl -s -u "${BITBUCKET_USERNAME}:${BITBUCKET_APP_PASSWORD}" \
+  PIPELINE_INFO=$(curl -s -u "${BITBUCKET_EMAIL}:${BITBUCKET_API_TOKEN}" \
     "https://api.bitbucket.org/2.0/repositories/${WORKSPACE}/${SERVICE_NAME}/pipelines/${BITBUCKET_PIPELINE_UUID}" 2>/dev/null || echo "{}")
 
   if [ -n "$PIPELINE_INFO" ] && [ "$PIPELINE_INFO" != "{}" ]; then
+    # Debug: print raw API response (remove after debugging)
+    echo "DEBUG: Pipeline API response:"
+    echo "$PIPELINE_INFO" | head -c 2000
+    echo ""
+
     # Extract creator display name
     CREATOR=$(echo "$PIPELINE_INFO" | grep -o '"creator"[[:space:]]*:[[:space:]]*{[^}]*}' | grep -o '"display_name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
     if [ -n "$CREATOR" ]; then
@@ -47,15 +52,15 @@ if [ -n "$BITBUCKET_USERNAME" ] && [ -n "$BITBUCKET_APP_PASSWORD" ] && [ -n "$BI
     # Extract trigger type (push, manual, schedule, etc.)
     TRIGGER_TYPE=$(echo "$PIPELINE_INFO" | grep -o '"trigger"[[:space:]]*:[[:space:]]*{[^}]*}' | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
 
-    # Extract commit message
+    # Extract commit message (nested under target.commit.message or top-level message)
     COMMIT_MSG=$(echo "$PIPELINE_INFO" | grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)
     if [ -n "$COMMIT_MSG" ]; then
       # Truncate long messages and escape for JSON
       COMMIT_MESSAGE=$(echo "$COMMIT_MSG" | head -c 100 | tr '\n' ' ' | sed 's/"/\\"/g')
     fi
 
-    # Extract duration if completed
-    DURATION_SECS=$(echo "$PIPELINE_INFO" | grep -o '"duration_in_seconds"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
+    # Extract duration if completed (API returns build_seconds_used)
+    DURATION_SECS=$(echo "$PIPELINE_INFO" | grep -o '"build_seconds_used"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
     if [ -n "$DURATION_SECS" ] && [ "$DURATION_SECS" -gt 0 ]; then
       MINS=$((DURATION_SECS / 60))
       SECS=$((DURATION_SECS % 60))
