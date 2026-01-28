@@ -34,8 +34,10 @@ DURATION=""
 # Fetch pipeline info from Bitbucket API
 if [ -n "$BITBUCKET_EMAIL" ] && [ -n "$BITBUCKET_API_TOKEN" ] && [ -n "$BITBUCKET_PIPELINE_UUID" ]; then
   echo "Fetching pipeline info from Bitbucket API..."
+  # Strip curly braces from UUID if present
+  PIPELINE_UUID_CLEAN=$(echo "$BITBUCKET_PIPELINE_UUID" | tr -d '{}')
   PIPELINE_INFO=$(curl -s -u "${BITBUCKET_EMAIL}:${BITBUCKET_API_TOKEN}" \
-    "https://api.bitbucket.org/2.0/repositories/${WORKSPACE}/${SERVICE_NAME}/pipelines/${BITBUCKET_PIPELINE_UUID}" 2>/dev/null || echo "{}")
+    "https://api.bitbucket.org/2.0/repositories/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pipelines/${PIPELINE_UUID_CLEAN}" 2>/dev/null || echo "{}")
 
   if [ -n "$PIPELINE_INFO" ] && [ "$PIPELINE_INFO" != "{}" ]; then
     # Debug: print raw API response (remove after debugging)
