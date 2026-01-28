@@ -4,10 +4,19 @@
   "version": "1.4",
   "body": [
     {
-      "type": "TextBlock",
-      "size": "Large",
-      "weight": "Bolder",
-      "text": "@{triggerBody()?['title']}"
+      "type": "Container",
+      "style": "@{triggerBody()?['themeColor']}",
+      "items": [
+        {
+          "type": "TextBlock",
+          "size": "Large",
+          "weight": "Bolder",
+          "text": "@{triggerBody()?['icon']} @{triggerBody()?['title']}",
+          "color": "Light"
+        }
+      ],
+      "bleed": true,
+      "padding": "Default"
     },
     {
       "type": "ColumnSet",
@@ -56,22 +65,23 @@
         {
           "title": "Commit",
           "value": "@{triggerBody()?['commit']}"
-        },
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "\"@{triggerBody()?['commitMessage']}\"",
+      "isSubtle": true,
+      "wrap": true,
+      "italic": true,
+      "separator": true
+    },
+    {
+      "type": "FactSet",
+      "facts": [
         {
-          "title": "Message",
-          "value": "@{triggerBody()?['commitMessage']}"
-        },
-        {
-          "title": "Status",
-          "value": "@{triggerBody()?['status']}"
-        },
-        {
-          "title": "Triggered By",
-          "value": "@{triggerBody()?['triggeredBy']}"
-        },
-        {
-          "title": "Trigger",
-          "value": "@{triggerBody()?['triggerType']}"
+          "title": "By",
+          "value": "@{triggerBody()?['triggeredByFull']}"
         },
         {
           "title": "Duration",
@@ -81,7 +91,8 @@
           "title": "Time",
           "value": "@{triggerBody()?['timestamp']}"
         }
-      ]
+      ],
+      "separator": true
     }
   ],
   "actions": [
@@ -89,16 +100,6 @@
       "type": "Action.OpenUrl",
       "title": "View Pipeline",
       "url": "@{triggerBody()?['pipelineUrl']}"
-    },
-    {
-      "type": "Action.OpenUrl",
-      "title": "View Commit",
-      "url": "@{triggerBody()?['commitUrl']}"
-    },
-    {
-      "type": "Action.OpenUrl",
-      "title": "View Branch",
-      "url": "@{triggerBody()?['branchUrl']}"
     }
   ]
 }

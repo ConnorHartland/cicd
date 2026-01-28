@@ -76,23 +76,34 @@ case $STATUS in
     TITLE="Deployment Started"
     COLOR="accent"
     FACT_STATUS="In Progress"
+    ICON="🚀"
     ;;
   success)
     TITLE="Deployment Succeeded"
     COLOR="good"
     FACT_STATUS="Completed"
+    ICON="✅"
     ;;
   failure)
     TITLE="Deployment Failed"
     COLOR="attention"
     FACT_STATUS="Failed"
+    ICON="❌"
     ;;
   *)
     TITLE="Deployment Update"
     COLOR="default"
     FACT_STATUS="$STATUS"
+    ICON="📋"
     ;;
 esac
+
+# Combine triggered by with trigger type
+if [ -n "$TRIGGER_TYPE" ]; then
+  TRIGGERED_BY_FULL="${TRIGGERED_BY} (${TRIGGER_TYPE})"
+else
+  TRIGGERED_BY_FULL="${TRIGGERED_BY}"
+fi
 
 # Build the payload for Power Automate
 PAYLOAD=$(cat << EOF
@@ -120,7 +131,9 @@ PAYLOAD=$(cat << EOF
   "pipelineUrl": "${PIPELINE_URL}",
   "triggeredBy": "${TRIGGERED_BY}",
   "triggerType": "${TRIGGER_TYPE}",
-  "duration": "${DURATION}"
+  "triggeredByFull": "${TRIGGERED_BY_FULL}",
+  "duration": "${DURATION}",
+  "icon": "${ICON}"
 }
 EOF
 )
