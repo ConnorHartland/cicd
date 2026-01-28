@@ -1,29 +1,36 @@
 #!/bin/bash
-set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG="$SCRIPT_DIR/repos.yaml"
+# repos.sh - Clone repos organized by team and branch
 
-WORKSPACE=$(yq '.workspace' "$CONFIG")
-FOLDER=$(yq '.folder' "$CONFIG")
-BRANCH=$(yq '.branch' "$CONFIG")
+declare -A REPOS=(
+    # Format: ["team/repo-name"]="branch"
+    ["backend/user-service"]="main"
+    ["backend/auth-service"]="develop"
+    ["backend/payment-service"]="main"
+    ["frontend/web-app"]="develop"
+    ["frontend/mobile-app"]="main"
+    ["devops/infra-terraform"]="main"
+    ["devops/pipeline-configs"]="develop"
+)
 
-# Expand ~
-FOLDER="${FOLDER/#\~/$HOME}"
-mkdir -p "$FOLDER"
+BASE_URL="git@bitbucket.org:yourorg"  # Change to your git host
+BASE_DIR="./repos"
 
-echo "Syncing to $FOLDER"
-
-for repo in $(yq '.repos[]' "$CONFIG"); do
-    echo "  $repo"
-    if [ -d "$FOLDER/$repo" ]; then
-        git -C "$FOLDER/$repo" fetch --all --prune
-        git -C "$FOLDER/$repo" checkout "$BRANCH"
-        git -C "$FOLDER/$repo" pull origin "$BRANCH"
-    else
-        git clone "git@bitbucket.org:${WORKSPACE}/${repo}.git" "$FOLDER/$repo"
-        git -C "$FOLDER/$repo" checkout "$BRANCH"
+for repo_path in "${!REPOS[@]}"; do
+    branch="${REPOS[$repo_path]}"
+    team="${repo_path%%/*}"
+    repo="${repo_path##*/}"
+    
+    target_dir="$BASE_DIR/$team/$repo"
+    
+    if [[ -d "$target_dir" ]]; then
+        echo "Skipping $repo (already exists)"
+        continue
     fi
+    
+    echo "Cloning $repo ($branch) -> $target_dir"
+    mkdir -p "$BASE_DIR/$team"
+    git clone -b "$branch" "$BASE_URL/$repo.git" "$target_dir"
 done
 
-echo "Done"
+echo "Done!"
