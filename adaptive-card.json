@@ -62,6 +62,10 @@
           "value": "@{triggerBody()?['status']}"
         },
         {
+          "title": "Triggered By",
+          "value": "@{triggerBody()?['triggeredBy']}"
+        },
+        {
           "title": "Time",
           "value": "@{triggerBody()?['timestamp']}"
         }
