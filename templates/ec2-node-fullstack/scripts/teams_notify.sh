@@ -14,29 +14,55 @@ fi
 
 echo "=== Sending Teams Notification (${STATUS}) ==="
 
-# Build deployment info
+# Build deployment info from env vars
 SERVICE_NAME="${BITBUCKET_REPO_SLUG:-unknown-service}"
 WORKSPACE="${BITBUCKET_WORKSPACE:-unknown}"
 ENVIRONMENT="${ENV_SUFFIX:-unknown}"
 ENVIRONMENT_UPPER=$(echo "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')
+BUILD_NUMBER="${BITBUCKET_BUILD_NUMBER:-0}"
+TIMESTAMP=$(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S CT')
+
+# Defaults
 BRANCH="${BITBUCKET_BRANCH:-unknown}"
 COMMIT_SHORT="${BITBUCKET_COMMIT:0:7}"
 COMMIT_FULL="${BITBUCKET_COMMIT:-unknown}"
-BUILD_NUMBER="${BITBUCKET_BUILD_NUMBER:-0}"
+COMMIT_MESSAGE=""
+TRIGGERED_BY="pipeline"
+TRIGGER_TYPE=""
+DURATION=""
 
-# Get user who triggered the pipeline
-if [ -n "$BITBUCKET_STEP_TRIGGERER_UUID" ]; then
-  # Try to get display name from Bitbucket API
-  USER_INFO=$(curl -s -u "${BITBUCKET_USERNAME}:${BITBUCKET_APP_PASSWORD}" \
-    "https://api.bitbucket.org/2.0/users/${BITBUCKET_STEP_TRIGGERER_UUID}" 2>/dev/null || echo "{}")
-  TRIGGERED_BY=$(echo "$USER_INFO" | grep -o '"display_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)
-  if [ -z "$TRIGGERED_BY" ]; then
-    TRIGGERED_BY="${BITBUCKET_STEP_TRIGGERER_UUID}"
+# Fetch pipeline info from Bitbucket API
+if [ -n "$BITBUCKET_USERNAME" ] && [ -n "$BITBUCKET_APP_PASSWORD" ] && [ -n "$BITBUCKET_PIPELINE_UUID" ]; then
+  echo "Fetching pipeline info from Bitbucket API..."
+  PIPELINE_INFO=$(curl -s -u "${BITBUCKET_USERNAME}:${BITBUCKET_APP_PASSWORD}" \
+    "https://api.bitbucket.org/2.0/repositories/${WORKSPACE}/${SERVICE_NAME}/pipelines/${BITBUCKET_PIPELINE_UUID}" 2>/dev/null || echo "{}")
+
+  if [ -n "$PIPELINE_INFO" ] && [ "$PIPELINE_INFO" != "{}" ]; then
+    # Extract creator display name
+    CREATOR=$(echo "$PIPELINE_INFO" | grep -o '"creator"[[:space:]]*:[[:space:]]*{[^}]*}' | grep -o '"display_name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+    if [ -n "$CREATOR" ]; then
+      TRIGGERED_BY="$CREATOR"
+    fi
+
+    # Extract trigger type (push, manual, schedule, etc.)
+    TRIGGER_TYPE=$(echo "$PIPELINE_INFO" | grep -o '"trigger"[[:space:]]*:[[:space:]]*{[^}]*}' | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+
+    # Extract commit message
+    COMMIT_MSG=$(echo "$PIPELINE_INFO" | grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [ -n "$COMMIT_MSG" ]; then
+      # Truncate long messages and escape for JSON
+      COMMIT_MESSAGE=$(echo "$COMMIT_MSG" | head -c 100 | tr '\n' ' ' | sed 's/"/\\"/g')
+    fi
+
+    # Extract duration if completed
+    DURATION_SECS=$(echo "$PIPELINE_INFO" | grep -o '"duration_in_seconds"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
+    if [ -n "$DURATION_SECS" ] && [ "$DURATION_SECS" -gt 0 ]; then
+      MINS=$((DURATION_SECS / 60))
+      SECS=$((DURATION_SECS % 60))
+      DURATION="${MINS}m ${SECS}s"
+    fi
   fi
-else
-  TRIGGERED_BY="pipeline"
 fi
-TIMESTAMP=$(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S CT')
 
 # Build URLs
 REPO_URL="https://bitbucket.org/${WORKSPACE}/${SERVICE_NAME}"
@@ -69,7 +95,6 @@ case $STATUS in
 esac
 
 # Build the payload for Power Automate
-# Includes both the message wrapper AND flat properties for triggerBody() access
 PAYLOAD=$(cat << EOF
 {
   "type": "message",
@@ -84,6 +109,7 @@ PAYLOAD=$(cat << EOF
   "environment": "${ENVIRONMENT_UPPER}",
   "branch": "${BRANCH}",
   "commit": "${COMMIT_SHORT}",
+  "commitMessage": "${COMMIT_MESSAGE}",
   "status": "${FACT_STATUS}",
   "timestamp": "${TIMESTAMP}",
   "buildNumber": "#${BUILD_NUMBER}",
@@ -92,7 +118,9 @@ PAYLOAD=$(cat << EOF
   "branchUrl": "${BRANCH_URL}",
   "commitUrl": "${COMMIT_URL}",
   "pipelineUrl": "${PIPELINE_URL}",
-  "triggeredBy": "${TRIGGERED_BY}"
+  "triggeredBy": "${TRIGGERED_BY}",
+  "triggerType": "${TRIGGER_TYPE}",
+  "duration": "${DURATION}"
 }
 EOF
 )

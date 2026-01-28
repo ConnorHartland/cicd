@@ -58,12 +58,24 @@
           "value": "@{triggerBody()?['commit']}"
         },
         {
+          "title": "Message",
+          "value": "@{triggerBody()?['commitMessage']}"
+        },
+        {
           "title": "Status",
           "value": "@{triggerBody()?['status']}"
         },
         {
           "title": "Triggered By",
           "value": "@{triggerBody()?['triggeredBy']}"
+        },
+        {
+          "title": "Trigger",
+          "value": "@{triggerBody()?['triggerType']}"
+        },
+        {
+          "title": "Duration",
+          "value": "@{triggerBody()?['duration']}"
         },
         {
           "title": "Time",
