@@ -22,8 +22,20 @@ ENVIRONMENT_UPPER=$(echo "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')
 BRANCH="${BITBUCKET_BRANCH:-unknown}"
 COMMIT_SHORT="${BITBUCKET_COMMIT:0:7}"
 COMMIT_FULL="${BITBUCKET_COMMIT:-unknown}"
-TRIGGERED_BY="${BITBUCKET_STEP_TRIGGERER_UUID:-pipeline}"
 BUILD_NUMBER="${BITBUCKET_BUILD_NUMBER:-0}"
+
+# Get user who triggered the pipeline
+if [ -n "$BITBUCKET_STEP_TRIGGERER_UUID" ]; then
+  # Try to get display name from Bitbucket API
+  USER_INFO=$(curl -s -u "${BITBUCKET_USERNAME}:${BITBUCKET_APP_PASSWORD}" \
+    "https://api.bitbucket.org/2.0/users/${BITBUCKET_STEP_TRIGGERER_UUID}" 2>/dev/null || echo "{}")
+  TRIGGERED_BY=$(echo "$USER_INFO" | grep -o '"display_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)
+  if [ -z "$TRIGGERED_BY" ]; then
+    TRIGGERED_BY="${BITBUCKET_STEP_TRIGGERER_UUID}"
+  fi
+else
+  TRIGGERED_BY="pipeline"
+fi
 TIMESTAMP=$(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S CT')
 
 # Build URLs
@@ -79,7 +91,8 @@ PAYLOAD=$(cat << EOF
   "repoUrl": "${REPO_URL}",
   "branchUrl": "${BRANCH_URL}",
   "commitUrl": "${COMMIT_URL}",
-  "pipelineUrl": "${PIPELINE_URL}"
+  "pipelineUrl": "${PIPELINE_URL}",
+  "triggeredBy": "${TRIGGERED_BY}"
 }
 EOF
 )
