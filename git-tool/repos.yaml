@@ -1,9 +1,11 @@
 # Repos to clone
 workspace: your-bitbucket-workspace
 folder: ~/repos
-branch: main
 
 repos:
-  - repo1
-  - repo2
-  - repo3
+  - name: repo1
+    branch: main
+  - name: repo2
+    branch: prod
+  - name: repo3
+    branch: main
