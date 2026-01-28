@@ -1,21 +1,18 @@
 #!/bin/bash
 # prisma_migration.sh
 # Runs Prisma database migrations with Kerberos authentication
-# Usage: ./prisma_migration.sh <service> <environment> [seed]
+#
+# Required env vars: SERVICE_NAME, ENV_SUFFIX
+# Optional env vars: SEED
 
 set -e
 
-SERVICE=${1:-$SERVICE_NAME}
-APP_ENV=${2:-$ENV_SUFFIX}
-SEED=${3:-false}
-
-if [ -z "$SERVICE" ] || [ -z "$APP_ENV" ]; then
-  echo "Error: SERVICE and APP_ENV are required"
-  echo "Usage: ./prisma_migration.sh <service> <environment> [seed]"
+if [ -z "$SERVICE_NAME" ] || [ -z "$ENV_SUFFIX" ]; then
+  echo "Error: SERVICE_NAME and ENV_SUFFIX are required"
   exit 1
 fi
 
-echo "Running Prisma migration for service: $SERVICE, environment: $APP_ENV"
+echo "Running Prisma migration for service: $SERVICE_NAME, environment: $ENV_SUFFIX"
 
 SPN=""
 KTAB=""
@@ -26,9 +23,9 @@ export PRISMA_SCHEMA_ENGINE_BINARY=${PRISMA_SCHEMA_ENGINE_BINARY:-~/engines/sche
 
 # Database configuration per service and environment
 # NOTE: Customize these values for your services
-case "$APP_ENV" in
+case "$ENV_SUFFIX" in
   "dev")
-    case $SERVICE in
+    case $SERVICE_NAME in
       # Add your service database configurations here
       # Example:
       # "my-api-service")
@@ -37,37 +34,37 @@ case "$APP_ENV" in
       #   KTAB="/etc/krb5.keytab.myservicedev"
       #   ;;
       *)
-        echo "Unknown service: $SERVICE for environment: $APP_ENV"
+        echo "Unknown service: $SERVICE_NAME for environment: $ENV_SUFFIX"
         exit 1
         ;;
     esac
     ;;
   "test")
-    case $SERVICE in
+    case $SERVICE_NAME in
       *)
-        echo "Unknown service: $SERVICE for environment: $APP_ENV"
+        echo "Unknown service: $SERVICE_NAME for environment: $ENV_SUFFIX"
         exit 1
         ;;
     esac
     ;;
   "qa")
-    case $SERVICE in
+    case $SERVICE_NAME in
       *)
-        echo "Unknown service: $SERVICE for environment: $APP_ENV"
+        echo "Unknown service: $SERVICE_NAME for environment: $ENV_SUFFIX"
         exit 1
         ;;
     esac
     ;;
   "prod")
-    case $SERVICE in
+    case $SERVICE_NAME in
       *)
-        echo "Unknown service: $SERVICE for environment: $APP_ENV"
+        echo "Unknown service: $SERVICE_NAME for environment: $ENV_SUFFIX"
         exit 1
         ;;
     esac
     ;;
   *)
-    echo "Invalid environment: $APP_ENV"
+    echo "Invalid environment: $ENV_SUFFIX"
     echo "Valid environments: dev, test, qa, prod"
     exit 1
     ;;
@@ -89,7 +86,7 @@ npm run prisma:generate
 
 # Seed database if requested (non-prod only)
 if [ "$SEED" = "true" ]; then
-  if [ "$APP_ENV" = "prod" ]; then
+  if [ "$ENV_SUFFIX" = "prod" ]; then
     echo "Warning: Skipping seed for production environment"
   else
     echo "Preparing and seeding database..."

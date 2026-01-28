@@ -2,11 +2,11 @@
 # setup_kafka.sh
 # Sets up Kafka topics based on kafka.yml in the service repo
 # Uses npm scripts defined in the service's package.json
+#
+# Required env vars: ENV_SUFFIX
+# Optional env vars: ALLOW_TOPIC_RECREATE
 
 set -e
-
-ENV_SUFFIX=${1:-$ENV_SUFFIX}
-ALLOW_TOPIC_RECREATE=${2:-$ALLOW_TOPIC_RECREATE}
 
 if [ -z "$ENV_SUFFIX" ]; then
   echo "Error: ENV_SUFFIX is required"

@@ -134,25 +134,14 @@ definitions:
           - linux.shell
           - node22
 
-    - step: &predeploy-nonprod
+    - step: &predeploy
         name: Pre-deploy
         script:
-          - ./scripts/setup_kafka.sh $ENV_SUFFIX $ALLOW_TOPIC_RECREATE
-          - ./scripts/prisma_migration.sh $SERVICE_NAME $ENV_SUFFIX $SEED
+          - ./scripts/predeploy.sh
         runs-on:
           - self.hosted
           - linux.shell
           - node22
-
-    - step: &predeploy-prod
-        name: Pre-deploy (Production)
-        script:
-          - ./scripts/setup_kafka.sh $ENV_SUFFIX
-          - ./scripts/prisma_migration.sh $SERVICE_NAME $ENV_SUFFIX
-        runs-on:
-          - self.hosted
-          - linux.shell
-          - node22.prod
 
     - step: &deploy
         name: Deploy to AWS
@@ -264,7 +253,7 @@ pipelines:
           deployment: Test
           steps:
             - step: *build-client
-            - step: *predeploy-nonprod
+            - step: *predeploy
             - step: *deploy
             - step: *verify-deploy
       - stage:
@@ -273,7 +262,7 @@ pipelines:
           trigger: manual
           steps:
             - step: *build-client
-            - step: *predeploy-nonprod
+            - step: *predeploy
             - step: *deploy
             - step: *verify-deploy
       - stage:
@@ -282,7 +271,7 @@ pipelines:
           trigger: manual
           steps:
             - step: *build-client
-            - step: *predeploy-prod
+            - step: *predeploy
             - step: *deploy
             - step: *verify-deploy
       - step: *merge-pr
@@ -316,7 +305,7 @@ pipelines:
           deployment: Develop
           steps:
             - step: *build-client
-            - step: *predeploy-nonprod
+            - step: *predeploy
             - step: *deploy
             - step: *verify-deploy
 
@@ -333,7 +322,7 @@ pipelines:
           deployment: Test
           steps:
             - step: *build-client
-            - step: *predeploy-nonprod
+            - step: *predeploy
             - step: *deploy
             - step: *verify-deploy
 
@@ -344,7 +333,7 @@ pipelines:
           deployment: Production
           steps:
             - step: *build-client
-            - step: *predeploy-prod
+            - step: *predeploy
             - step: *deploy
             - step: *verify-deploy
 
@@ -365,7 +354,7 @@ pipelines:
           name: Setup Kafka
           script:
             - npm ci
-            - ./scripts/setup_kafka.sh $ENV_SUFFIX $ALLOW_TOPIC_RECREATE
+            - ./scripts/predeploy.sh
           runs-on:
             - self.hosted
             - linux.shell
