@@ -33,7 +33,13 @@ run_npm_audit() {
   # Server audit (root) - write to temp file
   echo "  Scanning server dependencies..."
   SERVER_AUDIT_FILE="$REPORT_TMP_DIR/npm_audit_server.json"
-  npm audit --json > "$SERVER_AUDIT_FILE" 2>/dev/null || echo '{}' > "$SERVER_AUDIT_FILE"
+  # npm audit returns non-zero when vulnerabilities found, so don't use ||
+  npm audit --json > "$SERVER_AUDIT_FILE" 2>&1 || true
+
+  # Ensure file exists and has valid JSON
+  if [ ! -s "$SERVER_AUDIT_FILE" ] || ! jq empty < "$SERVER_AUDIT_FILE" 2>/dev/null; then
+    echo '{}' > "$SERVER_AUDIT_FILE"
+  fi
 
   SERVER_CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' < "$SERVER_AUDIT_FILE")
   SERVER_HIGH=$(jq '.metadata.vulnerabilities.high // 0' < "$SERVER_AUDIT_FILE")
@@ -51,7 +57,14 @@ run_npm_audit() {
   CLIENT_TOTAL=0
 
   if [ -d "client" ] && [ -f "client/package.json" ]; then
-    (cd client && npm audit --json) > "$CLIENT_AUDIT_FILE" 2>/dev/null || echo '{}' > "$CLIENT_AUDIT_FILE"
+    # npm audit returns non-zero when vulnerabilities found, so don't use ||
+    (cd client && npm audit --json) > "$CLIENT_AUDIT_FILE" 2>&1 || true
+
+    # Ensure file exists and has valid JSON
+    if [ ! -s "$CLIENT_AUDIT_FILE" ] || ! jq empty < "$CLIENT_AUDIT_FILE" 2>/dev/null; then
+      echo '{}' > "$CLIENT_AUDIT_FILE"
+    fi
+
     CLIENT_CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' < "$CLIENT_AUDIT_FILE")
     CLIENT_HIGH=$(jq '.metadata.vulnerabilities.high // 0' < "$CLIENT_AUDIT_FILE")
     CLIENT_MODERATE=$(jq '.metadata.vulnerabilities.moderate // 0' < "$CLIENT_AUDIT_FILE")
@@ -129,7 +142,13 @@ run_snyk_scan() {
   if [ -n "$SNYK_TOKEN" ]; then
     # Server scan (root) - write to temp file
     echo "  Scanning server dependencies..."
-    snyk test --json > "$SERVER_SNYK_FILE" 2>/dev/null || echo '{}' > "$SERVER_SNYK_FILE"
+    # snyk returns non-zero when vulnerabilities found, so don't use ||
+    snyk test --json > "$SERVER_SNYK_FILE" 2>&1 || true
+
+    # Ensure file exists and has valid JSON
+    if [ ! -s "$SERVER_SNYK_FILE" ] || ! jq empty < "$SERVER_SNYK_FILE" 2>/dev/null; then
+      echo '{}' > "$SERVER_SNYK_FILE"
+    fi
 
     SERVER_SNYK_CRITICAL=$(jq '[.vulnerabilities[]? | select(.severity == "critical")] | length' < "$SERVER_SNYK_FILE")
     SERVER_SNYK_HIGH=$(jq '[.vulnerabilities[]? | select(.severity == "high")] | length' < "$SERVER_SNYK_FILE")
@@ -144,7 +163,14 @@ run_snyk_scan() {
     CLIENT_SNYK_LOW=0
 
     if [ -d "client" ] && [ -f "client/package.json" ]; then
-      (cd client && snyk test --json) > "$CLIENT_SNYK_FILE" 2>/dev/null || echo '{}' > "$CLIENT_SNYK_FILE"
+      # snyk returns non-zero when vulnerabilities found, so don't use ||
+      (cd client && snyk test --json) > "$CLIENT_SNYK_FILE" 2>&1 || true
+
+      # Ensure file exists and has valid JSON
+      if [ ! -s "$CLIENT_SNYK_FILE" ] || ! jq empty < "$CLIENT_SNYK_FILE" 2>/dev/null; then
+        echo '{}' > "$CLIENT_SNYK_FILE"
+      fi
+
       CLIENT_SNYK_CRITICAL=$(jq '[.vulnerabilities[]? | select(.severity == "critical")] | length' < "$CLIENT_SNYK_FILE")
       CLIENT_SNYK_HIGH=$(jq '[.vulnerabilities[]? | select(.severity == "high")] | length' < "$CLIENT_SNYK_FILE")
       CLIENT_SNYK_MEDIUM=$(jq '[.vulnerabilities[]? | select(.severity == "medium")] | length' < "$CLIENT_SNYK_FILE")

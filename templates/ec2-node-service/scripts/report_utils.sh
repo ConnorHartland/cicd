@@ -29,7 +29,13 @@ run_npm_audit() {
   echo "Running npm audit..."
 
   NPM_AUDIT_FILE="$REPORT_TMP_DIR/npm_audit.json"
-  npm audit --json > "$NPM_AUDIT_FILE" 2>/dev/null || echo '{}' > "$NPM_AUDIT_FILE"
+  # npm audit returns non-zero when vulnerabilities found, so don't use ||
+  npm audit --json > "$NPM_AUDIT_FILE" 2>&1 || true
+
+  # Ensure file exists and has valid JSON
+  if [ ! -s "$NPM_AUDIT_FILE" ] || ! jq empty < "$NPM_AUDIT_FILE" 2>/dev/null; then
+    echo '{}' > "$NPM_AUDIT_FILE"
+  fi
 
   NPM_CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' < "$NPM_AUDIT_FILE")
   NPM_HIGH=$(jq '.metadata.vulnerabilities.high // 0' < "$NPM_AUDIT_FILE")
@@ -70,7 +76,14 @@ run_snyk_scan() {
   SNYK_LOW=0
 
   if [ -n "$SNYK_TOKEN" ]; then
-    snyk test --json > "$SNYK_FILE" 2>/dev/null || echo '{}' > "$SNYK_FILE"
+    # snyk returns non-zero when vulnerabilities found, so don't use ||
+    snyk test --json > "$SNYK_FILE" 2>&1 || true
+
+    # Ensure file exists and has valid JSON
+    if [ ! -s "$SNYK_FILE" ] || ! jq empty < "$SNYK_FILE" 2>/dev/null; then
+      echo '{}' > "$SNYK_FILE"
+    fi
+
     SNYK_CRITICAL=$(jq '[.vulnerabilities[]? | select(.severity == "critical")] | length' < "$SNYK_FILE")
     SNYK_HIGH=$(jq '[.vulnerabilities[]? | select(.severity == "high")] | length' < "$SNYK_FILE")
     SNYK_MEDIUM=$(jq '[.vulnerabilities[]? | select(.severity == "medium")] | length' < "$SNYK_FILE")
