@@ -289,6 +289,11 @@ get_status_icon() {
   local high=$3
   local medium=${4:-0}
 
+  # Convert non-numeric values to 0
+  [[ "$critical" =~ ^[0-9]+$ ]] || critical=0
+  [[ "$high" =~ ^[0-9]+$ ]] || high=0
+  [[ "$medium" =~ ^[0-9]+$ ]] || medium=0
+
   case $type in
     sonar)
       if [ "$SONAR_QG_STATUS" = "ERROR" ]; then

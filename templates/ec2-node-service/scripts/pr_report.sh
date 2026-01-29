@@ -51,8 +51,11 @@ else
   SNYK_ICON=$(get_status_icon "snyk" "$SNYK_CRITICAL" "$SNYK_HIGH" "$SNYK_MEDIUM")
 fi
 
-# Build compact report
-SONAR_TOTAL=$((${SONAR_BUGS:-0} + ${SONAR_VULNS:-0} + ${SONAR_SMELLS:-0}))
+# Build compact report (convert "-" to 0 for arithmetic)
+_bugs="${SONAR_BUGS}"; [[ "$_bugs" =~ ^[0-9]+$ ]] || _bugs=0
+_vulns="${SONAR_VULNS}"; [[ "$_vulns" =~ ^[0-9]+$ ]] || _vulns=0
+_smells="${SONAR_SMELLS}"; [[ "$_smells" =~ ^[0-9]+$ ]] || _smells=0
+SONAR_TOTAL=$((_bugs + _vulns + _smells))
 REPORT="## :shield: Security Report\n\n"
 REPORT+="| Check | Status | Details |\n"
 REPORT+="|-------|--------|----------|\n"
