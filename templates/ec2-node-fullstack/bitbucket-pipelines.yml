@@ -153,11 +153,7 @@ definitions:
             export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
           - aws s3 rm s3://$S3_BUCKET --recursive --exclude "*.env" --quiet
           - aws s3 cp build_${BITBUCKET_COMMIT}.zip s3://$S3_BUCKET/build.zip --quiet
-          - |
-            PREFERENCES="{\"InstanceWarmup\": ${INSTANCE_WARMUP:-300}}"
-            aws autoscaling start-instance-refresh --region us-east-1 \
-              --auto-scaling-group-name $ASG_NAME \
-              --preferences "$PREFERENCES"
+          - ./scripts/deploy_asg.sh ${DEPLOY_METHOD:-refresh}
 
     - step: &verify-deploy
         name: Verify Deployment

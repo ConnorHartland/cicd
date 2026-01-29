@@ -1,6 +1,6 @@
 #!/bin/bash
 # verify_deploy.sh
-# Verifies deployment by waiting for ASG refresh and optionally triggering smoke tests
+# Verifies deployment by waiting for ASG refresh (if needed) and optionally triggering smoke tests
 
 set -e
 
@@ -9,59 +9,67 @@ echo "=== Verifying Deployment ==="
 #######################################
 # CONFIGURATION
 #######################################
+DEPLOY_METHOD="${DEPLOY_METHOD:-refresh}"
 ASG_REFRESH_TIMEOUT=${ASG_REFRESH_TIMEOUT:-600}  # 10 minutes
 ASG_POLL_INTERVAL=${ASG_POLL_INTERVAL:-30}       # 30 seconds
 SMOKE_TEST_TIMEOUT=${SMOKE_TEST_TIMEOUT:-600}    # 10 minutes
+AWS_REGION="${AWS_REGION:-us-east-1}"
 
 #######################################
-# 1. WAIT FOR ASG REFRESH
+# 1. WAIT FOR DEPLOY TO COMPLETE
 #######################################
-echo ""
-echo "=== Waiting for ASG Refresh ==="
-echo "ASG: $ASG_NAME"
+if [ "$DEPLOY_METHOD" = "ssm" ]; then
+  echo ""
+  echo "=== SSM Deploy (already completed) ==="
+  echo "Skipping ASG refresh wait - SSM deploy waits for completion"
+else
+  echo ""
+  echo "=== Waiting for ASG Refresh ==="
+  echo "ASG: $ASG_NAME"
 
-# Get the most recent instance refresh
-get_refresh_status() {
-  aws autoscaling describe-instance-refreshes \
-    --auto-scaling-group-name "$ASG_NAME" \
-    --region us-east-1 \
-    --max-records 1 \
-    --query 'InstanceRefreshes[0].[Status,PercentageComplete]' \
-    --output text
-}
+  # Get the most recent instance refresh
+  get_refresh_status() {
+    aws autoscaling describe-instance-refreshes \
+      --auto-scaling-group-name "$ASG_NAME" \
+      --region "$AWS_REGION" \
+      --max-records 1 \
+      --query 'InstanceRefreshes[0].[Status,PercentageComplete]' \
+      --output text
+  }
 
-START_TIME=$(date +%s)
-while true; do
-  RESULT=$(get_refresh_status)
-  STATUS=$(echo "$RESULT" | awk '{print $1}')
-  PERCENT=$(echo "$RESULT" | awk '{print $2}')
+  START_TIME=$(date +%s)
+  while true; do
+    RESULT=$(get_refresh_status)
+    STATUS=$(echo "$RESULT" | awk '{print $1}')
+    PERCENT=$(echo "$RESULT" | awk '{print $2}')
 
-  echo "Status: $STATUS ($PERCENT% complete)"
+    echo "Status: $STATUS ($PERCENT% complete)"
 
-  case "$STATUS" in
-    "Successful")
-      echo "ASG refresh completed successfully"
-      break
-      ;;
-    "Failed"|"Cancelled")
-      echo "ERROR: ASG refresh $STATUS"
-      exit 1
-      ;;
-    "Pending"|"InProgress")
-      ELAPSED=$(($(date +%s) - START_TIME))
-      if [ "$ELAPSED" -ge "$ASG_REFRESH_TIMEOUT" ]; then
-        echo "ERROR: ASG refresh timed out after ${ASG_REFRESH_TIMEOUT}s"
+    case "$STATUS" in
+      "Successful")
+        echo "ASG refresh completed successfully"
+        break
+        ;;
+      "Failed"|"Cancelled"|"RollbackSuccessful"|"RollbackFailed")
+        echo "ERROR: ASG refresh $STATUS"
         exit 1
-      fi
-      echo "Waiting ${ASG_POLL_INTERVAL}s..."
-      sleep "$ASG_POLL_INTERVAL"
-      ;;
-    *)
-      echo "Unknown status: $STATUS"
-      sleep "$ASG_POLL_INTERVAL"
-      ;;
-  esac
-done
+        ;;
+      "Pending"|"InProgress"|"Cancelling")
+        ELAPSED=$(($(date +%s) - START_TIME))
+        if [ "$ELAPSED" -ge "$ASG_REFRESH_TIMEOUT" ]; then
+          echo "ERROR: ASG refresh timed out after ${ASG_REFRESH_TIMEOUT}s"
+          exit 1
+        fi
+        echo "Waiting ${ASG_POLL_INTERVAL}s..."
+        sleep "$ASG_POLL_INTERVAL"
+        ;;
+      *)
+        echo "Unknown status: $STATUS"
+        sleep "$ASG_POLL_INTERVAL"
+        ;;
+    esac
+  done
+fi
 
 #######################################
 # 2. TRIGGER SMOKE TESTS (OPTIONAL)
