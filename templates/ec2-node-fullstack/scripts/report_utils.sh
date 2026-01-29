@@ -2,6 +2,17 @@
 # report_utils.sh - Shared utilities for security reports (Monorepo version)
 # Scans both server (root) and client directories
 
+# Temp directory for large JSON files (avoids "Argument list too long" errors)
+# Uses local .tmp dir for CI/CD isolation (cleaned up with workspace)
+REPORT_TMP_DIR="${BITBUCKET_CLONE_DIR:-.}/.tmp/report_$$"
+mkdir -p "$REPORT_TMP_DIR"
+
+# Cleanup temp files on exit
+cleanup_report_tmp() {
+  rm -rf "$REPORT_TMP_DIR"
+}
+trap cleanup_report_tmp EXIT
+
 #######################################
 # Get project key from sonar-project.properties
 #######################################
@@ -14,22 +25,25 @@ get_project_key() {
 #######################################
 # Run npm audit on both server and client
 # Combines results from both locations
+# Uses temp files to avoid "Argument list too long" errors
 #######################################
 run_npm_audit() {
   echo "Running npm audit (server + client)..."
 
-  # Server audit (root)
+  # Server audit (root) - write to temp file
   echo "  Scanning server dependencies..."
-  SERVER_AUDIT_JSON=$(npm audit --json 2>/dev/null || true)
-  SERVER_CRITICAL=$(echo "$SERVER_AUDIT_JSON" | jq '.metadata.vulnerabilities.critical // 0')
-  SERVER_HIGH=$(echo "$SERVER_AUDIT_JSON" | jq '.metadata.vulnerabilities.high // 0')
-  SERVER_MODERATE=$(echo "$SERVER_AUDIT_JSON" | jq '.metadata.vulnerabilities.moderate // 0')
-  SERVER_LOW=$(echo "$SERVER_AUDIT_JSON" | jq '.metadata.vulnerabilities.low // 0')
-  SERVER_TOTAL=$(echo "$SERVER_AUDIT_JSON" | jq '.metadata.vulnerabilities.total // 0')
+  SERVER_AUDIT_FILE="$REPORT_TMP_DIR/npm_audit_server.json"
+  npm audit --json > "$SERVER_AUDIT_FILE" 2>/dev/null || echo '{}' > "$SERVER_AUDIT_FILE"
 
-  # Client audit
+  SERVER_CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' < "$SERVER_AUDIT_FILE")
+  SERVER_HIGH=$(jq '.metadata.vulnerabilities.high // 0' < "$SERVER_AUDIT_FILE")
+  SERVER_MODERATE=$(jq '.metadata.vulnerabilities.moderate // 0' < "$SERVER_AUDIT_FILE")
+  SERVER_LOW=$(jq '.metadata.vulnerabilities.low // 0' < "$SERVER_AUDIT_FILE")
+  SERVER_TOTAL=$(jq '.metadata.vulnerabilities.total // 0' < "$SERVER_AUDIT_FILE")
+
+  # Client audit - write to temp file
   echo "  Scanning client dependencies..."
-  CLIENT_AUDIT_JSON=""
+  CLIENT_AUDIT_FILE="$REPORT_TMP_DIR/npm_audit_client.json"
   CLIENT_CRITICAL=0
   CLIENT_HIGH=0
   CLIENT_MODERATE=0
@@ -37,12 +51,14 @@ run_npm_audit() {
   CLIENT_TOTAL=0
 
   if [ -d "client" ] && [ -f "client/package.json" ]; then
-    CLIENT_AUDIT_JSON=$(cd client && npm audit --json 2>/dev/null || true)
-    CLIENT_CRITICAL=$(echo "$CLIENT_AUDIT_JSON" | jq '.metadata.vulnerabilities.critical // 0')
-    CLIENT_HIGH=$(echo "$CLIENT_AUDIT_JSON" | jq '.metadata.vulnerabilities.high // 0')
-    CLIENT_MODERATE=$(echo "$CLIENT_AUDIT_JSON" | jq '.metadata.vulnerabilities.moderate // 0')
-    CLIENT_LOW=$(echo "$CLIENT_AUDIT_JSON" | jq '.metadata.vulnerabilities.low // 0')
-    CLIENT_TOTAL=$(echo "$CLIENT_AUDIT_JSON" | jq '.metadata.vulnerabilities.total // 0')
+    (cd client && npm audit --json) > "$CLIENT_AUDIT_FILE" 2>/dev/null || echo '{}' > "$CLIENT_AUDIT_FILE"
+    CLIENT_CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' < "$CLIENT_AUDIT_FILE")
+    CLIENT_HIGH=$(jq '.metadata.vulnerabilities.high // 0' < "$CLIENT_AUDIT_FILE")
+    CLIENT_MODERATE=$(jq '.metadata.vulnerabilities.moderate // 0' < "$CLIENT_AUDIT_FILE")
+    CLIENT_LOW=$(jq '.metadata.vulnerabilities.low // 0' < "$CLIENT_AUDIT_FILE")
+    CLIENT_TOTAL=$(jq '.metadata.vulnerabilities.total // 0' < "$CLIENT_AUDIT_FILE")
+  else
+    echo '{}' > "$CLIENT_AUDIT_FILE"
   fi
 
   # Combine totals
@@ -52,17 +68,15 @@ run_npm_audit() {
   NPM_LOW=$((SERVER_LOW + CLIENT_LOW))
   NPM_TOTAL=$((SERVER_TOTAL + CLIENT_TOTAL))
 
-  # Store raw JSON for details extraction
-  NPM_AUDIT_JSON_SERVER="$SERVER_AUDIT_JSON"
-  NPM_AUDIT_JSON_CLIENT="$CLIENT_AUDIT_JSON"
-
-  export NPM_AUDIT_JSON_SERVER NPM_AUDIT_JSON_CLIENT
+  # Export file paths for details extraction
+  export SERVER_AUDIT_FILE CLIENT_AUDIT_FILE
   export NPM_CRITICAL NPM_HIGH NPM_MODERATE NPM_LOW NPM_TOTAL
   export SERVER_CRITICAL SERVER_HIGH CLIENT_CRITICAL CLIENT_HIGH
 }
 
 #######################################
 # Extract npm vulnerability details (critical/high) from both locations
+# Uses temp files to avoid "Argument list too long" errors
 #######################################
 extract_npm_details() {
   NPM_DETAILS=""
@@ -70,21 +84,21 @@ extract_npm_details() {
   if [ "$NPM_CRITICAL" -gt 0 ] || [ "$NPM_HIGH" -gt 0 ]; then
     # Server details
     if [ "$SERVER_CRITICAL" -gt 0 ] || [ "$SERVER_HIGH" -gt 0 ]; then
-      SERVER_DETAILS=$(echo "$NPM_AUDIT_JSON_SERVER" | jq -r '
+      SERVER_DETAILS=$(jq -r '
         .vulnerabilities | to_entries[] |
         select(.value.severity == "critical" or .value.severity == "high") |
         "\(.value.severity | ascii_upcase)|\(.key) (server)|\(.value.via[0].title // .value.via[0] // "N/A")"
-      ' 2>/dev/null | head -25 || true)
+      ' < "$SERVER_AUDIT_FILE" 2>/dev/null | head -25 || true)
       NPM_DETAILS="${SERVER_DETAILS}"
     fi
 
     # Client details
     if [ "$CLIENT_CRITICAL" -gt 0 ] || [ "$CLIENT_HIGH" -gt 0 ]; then
-      CLIENT_DETAILS=$(echo "$NPM_AUDIT_JSON_CLIENT" | jq -r '
+      CLIENT_DETAILS=$(jq -r '
         .vulnerabilities | to_entries[] |
         select(.value.severity == "critical" or .value.severity == "high") |
         "\(.value.severity | ascii_upcase)|\(.key) (client)|\(.value.via[0].title // .value.via[0] // "N/A")"
-      ' 2>/dev/null | head -25 || true)
+      ' < "$CLIENT_AUDIT_FILE" 2>/dev/null | head -25 || true)
       if [ -n "$NPM_DETAILS" ] && [ -n "$CLIENT_DETAILS" ]; then
         NPM_DETAILS="${NPM_DETAILS}\n${CLIENT_DETAILS}"
       elif [ -n "$CLIENT_DETAILS" ]; then
@@ -99,48 +113,44 @@ extract_npm_details() {
 #######################################
 # Run Snyk scan on both server and client
 # Combines results from both locations
+# Uses temp files to avoid "Argument list too long" errors
 #######################################
 run_snyk_scan() {
   echo "Running Snyk scan (server + client)..."
 
-  SNYK_JSON=""
   SNYK_CRITICAL=0
   SNYK_HIGH=0
   SNYK_MEDIUM=0
   SNYK_LOW=0
 
+  SERVER_SNYK_FILE="$REPORT_TMP_DIR/snyk_server.json"
+  CLIENT_SNYK_FILE="$REPORT_TMP_DIR/snyk_client.json"
+
   if [ -n "$SNYK_TOKEN" ]; then
-    # Server scan (root)
+    # Server scan (root) - write to temp file
     echo "  Scanning server dependencies..."
-    SERVER_SNYK_JSON=$(snyk test --json 2>/dev/null || true)
-    SERVER_SNYK_CRITICAL=0
-    SERVER_SNYK_HIGH=0
-    SERVER_SNYK_MEDIUM=0
-    SERVER_SNYK_LOW=0
+    snyk test --json > "$SERVER_SNYK_FILE" 2>/dev/null || echo '{}' > "$SERVER_SNYK_FILE"
 
-    if [ -n "$SERVER_SNYK_JSON" ]; then
-      SERVER_SNYK_CRITICAL=$(echo "$SERVER_SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "critical")] | length')
-      SERVER_SNYK_HIGH=$(echo "$SERVER_SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "high")] | length')
-      SERVER_SNYK_MEDIUM=$(echo "$SERVER_SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "medium")] | length')
-      SERVER_SNYK_LOW=$(echo "$SERVER_SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "low")] | length')
-    fi
+    SERVER_SNYK_CRITICAL=$(jq '[.vulnerabilities[]? | select(.severity == "critical")] | length' < "$SERVER_SNYK_FILE")
+    SERVER_SNYK_HIGH=$(jq '[.vulnerabilities[]? | select(.severity == "high")] | length' < "$SERVER_SNYK_FILE")
+    SERVER_SNYK_MEDIUM=$(jq '[.vulnerabilities[]? | select(.severity == "medium")] | length' < "$SERVER_SNYK_FILE")
+    SERVER_SNYK_LOW=$(jq '[.vulnerabilities[]? | select(.severity == "low")] | length' < "$SERVER_SNYK_FILE")
 
-    # Client scan
+    # Client scan - write to temp file
     echo "  Scanning client dependencies..."
-    CLIENT_SNYK_JSON=""
     CLIENT_SNYK_CRITICAL=0
     CLIENT_SNYK_HIGH=0
     CLIENT_SNYK_MEDIUM=0
     CLIENT_SNYK_LOW=0
 
     if [ -d "client" ] && [ -f "client/package.json" ]; then
-      CLIENT_SNYK_JSON=$(cd client && snyk test --json 2>/dev/null || true)
-      if [ -n "$CLIENT_SNYK_JSON" ]; then
-        CLIENT_SNYK_CRITICAL=$(echo "$CLIENT_SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "critical")] | length')
-        CLIENT_SNYK_HIGH=$(echo "$CLIENT_SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "high")] | length')
-        CLIENT_SNYK_MEDIUM=$(echo "$CLIENT_SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "medium")] | length')
-        CLIENT_SNYK_LOW=$(echo "$CLIENT_SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "low")] | length')
-      fi
+      (cd client && snyk test --json) > "$CLIENT_SNYK_FILE" 2>/dev/null || echo '{}' > "$CLIENT_SNYK_FILE"
+      CLIENT_SNYK_CRITICAL=$(jq '[.vulnerabilities[]? | select(.severity == "critical")] | length' < "$CLIENT_SNYK_FILE")
+      CLIENT_SNYK_HIGH=$(jq '[.vulnerabilities[]? | select(.severity == "high")] | length' < "$CLIENT_SNYK_FILE")
+      CLIENT_SNYK_MEDIUM=$(jq '[.vulnerabilities[]? | select(.severity == "medium")] | length' < "$CLIENT_SNYK_FILE")
+      CLIENT_SNYK_LOW=$(jq '[.vulnerabilities[]? | select(.severity == "low")] | length' < "$CLIENT_SNYK_FILE")
+    else
+      echo '{}' > "$CLIENT_SNYK_FILE"
     fi
 
     # Combine totals
@@ -149,18 +159,20 @@ run_snyk_scan() {
     SNYK_MEDIUM=$((SERVER_SNYK_MEDIUM + CLIENT_SNYK_MEDIUM))
     SNYK_LOW=$((SERVER_SNYK_LOW + CLIENT_SNYK_LOW))
 
-    # Store raw JSON for details extraction
-    SNYK_JSON_SERVER="$SERVER_SNYK_JSON"
-    SNYK_JSON_CLIENT="$CLIENT_SNYK_JSON"
-    export SNYK_JSON_SERVER SNYK_JSON_CLIENT
+    # Export file paths for details extraction
+    export SERVER_SNYK_FILE CLIENT_SNYK_FILE
     export SERVER_SNYK_CRITICAL SERVER_SNYK_HIGH CLIENT_SNYK_CRITICAL CLIENT_SNYK_HIGH
+  else
+    echo '{}' > "$SERVER_SNYK_FILE"
+    echo '{}' > "$CLIENT_SNYK_FILE"
   fi
 
-  export SNYK_JSON SNYK_CRITICAL SNYK_HIGH SNYK_MEDIUM SNYK_LOW
+  export SNYK_CRITICAL SNYK_HIGH SNYK_MEDIUM SNYK_LOW
 }
 
 #######################################
 # Extract Snyk vulnerability details (critical/high) from both locations
+# Uses temp files to avoid "Argument list too long" errors
 #######################################
 extract_snyk_details() {
   SNYK_DETAILS=""
@@ -169,21 +181,21 @@ extract_snyk_details() {
     if [ "$SNYK_CRITICAL" -gt 0 ] || [ "$SNYK_HIGH" -gt 0 ]; then
       # Server details
       if [ "$SERVER_SNYK_CRITICAL" -gt 0 ] || [ "$SERVER_SNYK_HIGH" -gt 0 ]; then
-        SERVER_DETAILS=$(echo "$SNYK_JSON_SERVER" | jq -r '
+        SERVER_DETAILS=$(jq -r '
           [.vulnerabilities[]? | select(.severity == "critical" or .severity == "high")] |
           unique_by(.id) | .[:25][] |
           "\(.severity | ascii_upcase)|\(.packageName) (server)|\(.title // "N/A")"
-        ' 2>/dev/null || true)
+        ' < "$SERVER_SNYK_FILE" 2>/dev/null || true)
         SNYK_DETAILS="${SERVER_DETAILS}"
       fi
 
       # Client details
       if [ "$CLIENT_SNYK_CRITICAL" -gt 0 ] || [ "$CLIENT_SNYK_HIGH" -gt 0 ]; then
-        CLIENT_DETAILS=$(echo "$SNYK_JSON_CLIENT" | jq -r '
+        CLIENT_DETAILS=$(jq -r '
           [.vulnerabilities[]? | select(.severity == "critical" or .severity == "high")] |
           unique_by(.id) | .[:25][] |
           "\(.severity | ascii_upcase)|\(.packageName) (client)|\(.title // "N/A")"
-        ' 2>/dev/null || true)
+        ' < "$CLIENT_SNYK_FILE" 2>/dev/null || true)
         if [ -n "$SNYK_DETAILS" ] && [ -n "$CLIENT_DETAILS" ]; then
           SNYK_DETAILS="${SNYK_DETAILS}\n${CLIENT_DETAILS}"
         elif [ -n "$CLIENT_DETAILS" ]; then
@@ -261,6 +273,7 @@ fetch_sonar_issues() {
 #######################################
 # Post comment to Bitbucket PR
 # Returns: HTTP status code
+# Uses temp file to avoid "Argument list too long" errors
 #######################################
 post_to_pr() {
   local content=$1
@@ -272,13 +285,22 @@ post_to_pr() {
 
   echo "Posting report to PR #${BITBUCKET_PR_ID}..."
 
+  # Write content to temp file, then build JSON payload
+  local content_file="$REPORT_TMP_DIR/pr_content.txt"
+  local payload_file="$REPORT_TMP_DIR/pr_payload.json"
+
+  printf '%s' "$content" > "$content_file"
+
+  # Build JSON payload using jq with file input
+  jq -n --rawfile content "$content_file" '{"content": {"raw": $content}}' > "$payload_file"
+
   local response
   response=$(curl -s -w "\n%{http_code}" -X POST \
     -u "${BITBUCKET_EMAIL}:${BITBUCKET_API_TOKEN}" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
     "https://api.bitbucket.org/2.0/repositories/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pullrequests/${BITBUCKET_PR_ID}/comments" \
-    -d "{\"content\": {\"raw\": $(echo "$content" | jq -Rs .)}}")
+    -d @"$payload_file")
 
   local http_code
   http_code=$(echo "$response" | tail -n1)
@@ -288,6 +310,7 @@ post_to_pr() {
     return 0
   else
     echo "Failed to post report (HTTP ${http_code})"
+    echo "$response" | head -n -1
     return 1
   fi
 }

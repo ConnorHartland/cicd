@@ -1,6 +1,17 @@
 #!/bin/bash
 # report_utils.sh - Shared utilities for security reports
 
+# Temp directory for large JSON files (avoids "Argument list too long" errors)
+# Uses local .tmp dir for CI/CD isolation (cleaned up with workspace)
+REPORT_TMP_DIR="${BITBUCKET_CLONE_DIR:-.}/.tmp/report_$$"
+mkdir -p "$REPORT_TMP_DIR"
+
+# Cleanup temp files on exit
+cleanup_report_tmp() {
+  rm -rf "$REPORT_TMP_DIR"
+}
+trap cleanup_report_tmp EXIT
+
 #######################################
 # Get project key from sonar-project.properties
 #######################################
@@ -12,71 +23,78 @@ get_project_key() {
 
 #######################################
 # Run npm audit and export NPM_* variables
+# Uses temp files to avoid "Argument list too long" errors
 #######################################
 run_npm_audit() {
   echo "Running npm audit..."
-  NPM_AUDIT_JSON=$(npm audit --json 2>/dev/null || true)
 
-  NPM_CRITICAL=$(echo "$NPM_AUDIT_JSON" | jq '.metadata.vulnerabilities.critical // 0')
-  NPM_HIGH=$(echo "$NPM_AUDIT_JSON" | jq '.metadata.vulnerabilities.high // 0')
-  NPM_MODERATE=$(echo "$NPM_AUDIT_JSON" | jq '.metadata.vulnerabilities.moderate // 0')
-  NPM_LOW=$(echo "$NPM_AUDIT_JSON" | jq '.metadata.vulnerabilities.low // 0')
-  NPM_TOTAL=$(echo "$NPM_AUDIT_JSON" | jq '.metadata.vulnerabilities.total // 0')
+  NPM_AUDIT_FILE="$REPORT_TMP_DIR/npm_audit.json"
+  npm audit --json > "$NPM_AUDIT_FILE" 2>/dev/null || echo '{}' > "$NPM_AUDIT_FILE"
 
-  export NPM_AUDIT_JSON NPM_CRITICAL NPM_HIGH NPM_MODERATE NPM_LOW NPM_TOTAL
+  NPM_CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' < "$NPM_AUDIT_FILE")
+  NPM_HIGH=$(jq '.metadata.vulnerabilities.high // 0' < "$NPM_AUDIT_FILE")
+  NPM_MODERATE=$(jq '.metadata.vulnerabilities.moderate // 0' < "$NPM_AUDIT_FILE")
+  NPM_LOW=$(jq '.metadata.vulnerabilities.low // 0' < "$NPM_AUDIT_FILE")
+  NPM_TOTAL=$(jq '.metadata.vulnerabilities.total // 0' < "$NPM_AUDIT_FILE")
+
+  export NPM_AUDIT_FILE NPM_CRITICAL NPM_HIGH NPM_MODERATE NPM_LOW NPM_TOTAL
 }
 
 #######################################
 # Extract npm vulnerability details (critical/high)
+# Uses temp files to avoid "Argument list too long" errors
 #######################################
 extract_npm_details() {
   NPM_DETAILS=""
   if [ "$NPM_CRITICAL" -gt 0 ] || [ "$NPM_HIGH" -gt 0 ]; then
-    NPM_DETAILS=$(echo "$NPM_AUDIT_JSON" | jq -r '
+    NPM_DETAILS=$(jq -r '
       .vulnerabilities | to_entries[] |
       select(.value.severity == "critical" or .value.severity == "high") |
       "\(.value.severity | ascii_upcase)|\(.key)|\(.value.via[0].title // .value.via[0] // "N/A")"
-    ' 2>/dev/null | head -50 || true)
+    ' < "$NPM_AUDIT_FILE" 2>/dev/null | head -50 || true)
   fi
   export NPM_DETAILS
 }
 
 #######################################
 # Run Snyk scan and export SNYK_* variables
+# Uses temp files to avoid "Argument list too long" errors
 #######################################
 run_snyk_scan() {
   echo "Running Snyk scan..."
-  SNYK_JSON=""
+
+  SNYK_FILE="$REPORT_TMP_DIR/snyk.json"
   SNYK_CRITICAL=0
   SNYK_HIGH=0
   SNYK_MEDIUM=0
   SNYK_LOW=0
 
   if [ -n "$SNYK_TOKEN" ]; then
-    SNYK_JSON=$(snyk test --json 2>/dev/null || true)
-    if [ -n "$SNYK_JSON" ]; then
-      SNYK_CRITICAL=$(echo "$SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "critical")] | length')
-      SNYK_HIGH=$(echo "$SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "high")] | length')
-      SNYK_MEDIUM=$(echo "$SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "medium")] | length')
-      SNYK_LOW=$(echo "$SNYK_JSON" | jq '[.vulnerabilities[]? | select(.severity == "low")] | length')
-    fi
+    snyk test --json > "$SNYK_FILE" 2>/dev/null || echo '{}' > "$SNYK_FILE"
+    SNYK_CRITICAL=$(jq '[.vulnerabilities[]? | select(.severity == "critical")] | length' < "$SNYK_FILE")
+    SNYK_HIGH=$(jq '[.vulnerabilities[]? | select(.severity == "high")] | length' < "$SNYK_FILE")
+    SNYK_MEDIUM=$(jq '[.vulnerabilities[]? | select(.severity == "medium")] | length' < "$SNYK_FILE")
+    SNYK_LOW=$(jq '[.vulnerabilities[]? | select(.severity == "low")] | length' < "$SNYK_FILE")
+  else
+    echo '{}' > "$SNYK_FILE"
   fi
 
-  export SNYK_JSON SNYK_CRITICAL SNYK_HIGH SNYK_MEDIUM SNYK_LOW
+  export SNYK_FILE SNYK_CRITICAL SNYK_HIGH SNYK_MEDIUM SNYK_LOW
 }
 
 #######################################
 # Extract Snyk vulnerability details (critical/high)
+# Uses temp files to avoid "Argument list too long" errors
 #######################################
 extract_snyk_details() {
   SNYK_DETAILS=""
-  if [ -n "$SNYK_TOKEN" ] && [ -n "$SNYK_JSON" ]; then
+  if [ -n "$SNYK_TOKEN" ]; then
     if [ "$SNYK_CRITICAL" -gt 0 ] || [ "$SNYK_HIGH" -gt 0 ]; then
-      SNYK_DETAILS=$(echo "$SNYK_JSON" | jq -r '
+      SNYK_DETAILS=$(jq -r '
         [.vulnerabilities[]? | select(.severity == "critical" or .severity == "high")] |
         unique_by(.id) | .[:50][] |
         "\(.severity | ascii_upcase)|\(.packageName)|\(.title // "N/A")"
-      ' 2>/dev/null || true)
+      ' < "$SNYK_FILE" 2>/dev/null || true)
     fi
   fi
   export SNYK_DETAILS
@@ -147,6 +165,7 @@ fetch_sonar_issues() {
 #######################################
 # Post comment to Bitbucket PR
 # Returns: HTTP status code
+# Uses temp file to avoid "Argument list too long" errors
 #######################################
 post_to_pr() {
   local content=$1
@@ -158,13 +177,22 @@ post_to_pr() {
 
   echo "Posting report to PR #${BITBUCKET_PR_ID}..."
 
+  # Write content to temp file, then build JSON payload
+  local content_file="$REPORT_TMP_DIR/pr_content.txt"
+  local payload_file="$REPORT_TMP_DIR/pr_payload.json"
+
+  printf '%s' "$content" > "$content_file"
+
+  # Build JSON payload using jq with file input
+  jq -n --rawfile content "$content_file" '{"content": {"raw": $content}}' > "$payload_file"
+
   local response
   response=$(curl -s -w "\n%{http_code}" -X POST \
     -u "${BITBUCKET_EMAIL}:${BITBUCKET_API_TOKEN}" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
     "https://api.bitbucket.org/2.0/repositories/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pullrequests/${BITBUCKET_PR_ID}/comments" \
-    -d "{\"content\": {\"raw\": $(echo "$content" | jq -Rs .)}}")
+    -d @"$payload_file")
 
   local http_code
   http_code=$(echo "$response" | tail -n1)
@@ -174,6 +202,7 @@ post_to_pr() {
     return 0
   else
     echo "Failed to post report (HTTP ${http_code})"
+    echo "$response" | head -n -1
     return 1
   fi
 }
