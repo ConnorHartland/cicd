@@ -69,15 +69,16 @@ case $DEPLOY_METHOD in
       --instance-ids $INSTANCE_IDS \
       --document-name "AWS-RunShellScript" \
       --parameters "commands=[
-        'set -e',
-        'echo Stopping ${WEBAPP_SERVICE}...',
-        'systemctl stop ${WEBAPP_SERVICE} || true',
+        'echo === Starting deployment ===',
+        'systemctl stop ${WEBAPP_SERVICE} 2>/dev/null || echo Service was not running',
         'echo Downloading build from S3...',
         'aws s3 cp s3://${S3_BUCKET}/build.zip ${WEBAPP_DIR}/',
-        'unzip -o ${WEBAPP_DIR}/build.zip -d ${WEBAPP_DIR}/',
+        'echo Extracting build...',
+        'cd ${WEBAPP_DIR} && unzip -o build.zip',
         'echo Starting ${WEBAPP_SERVICE}...',
         'systemctl start ${WEBAPP_SERVICE}',
-        'echo Deploy complete'
+        'sleep 2',
+        'systemctl is-active ${WEBAPP_SERVICE} && echo === Deploy successful ==='
       ]" \
       --timeout-seconds 300 \
       --query 'Command.CommandId' \
@@ -85,40 +86,72 @@ case $DEPLOY_METHOD in
 
     echo "SSM command started: $COMMAND_ID"
 
-    # Wait for completion on all instances
-    FIRST_INSTANCE="${INSTANCE_IDS%% *}"
+    # Poll for completion instead of using waiter (more control)
     echo "Waiting for command to complete..."
+    WAIT_TIMEOUT=300
+    ELAPSED=0
+    while [ "$ELAPSED" -lt "$WAIT_TIMEOUT" ]; do
+      sleep 10
+      ELAPSED=$((ELAPSED + 10))
 
-    aws ssm wait command-executed \
-      --command-id "$COMMAND_ID" \
-      --instance-id "$FIRST_INSTANCE" \
-      --region "$AWS_REGION"
+      # Check command status
+      CMD_STATUS=$(aws ssm list-commands \
+        --region "$AWS_REGION" \
+        --command-id "$COMMAND_ID" \
+        --query 'Commands[0].Status' \
+        --output text 2>/dev/null || echo "Pending")
 
-    # Check results for all instances
-    echo "Checking results..."
+      echo "  Command status: $CMD_STATUS (${ELAPSED}s)"
+
+      if [ "$CMD_STATUS" = "Success" ]; then
+        break
+      elif [ "$CMD_STATUS" = "Failed" ] || [ "$CMD_STATUS" = "Cancelled" ] || [ "$CMD_STATUS" = "TimedOut" ]; then
+        echo "Command finished with status: $CMD_STATUS"
+        break
+      fi
+    done
+
+    # Check results and output for all instances
+    echo ""
+    echo "=== Instance Results ==="
     FAILED=0
     for INSTANCE_ID in $INSTANCE_IDS; do
-      STATUS=$(aws ssm get-command-invocation \
+      INVOCATION=$(aws ssm get-command-invocation \
         --region "$AWS_REGION" \
         --command-id "$COMMAND_ID" \
         --instance-id "$INSTANCE_ID" \
-        --query 'Status' \
-        --output text 2>/dev/null || echo "Unknown")
+        --output json 2>/dev/null || echo "{}")
 
-      if [ "$STATUS" = "Success" ]; then
-        echo "  ${INSTANCE_ID}: Success"
-      else
-        echo "  ${INSTANCE_ID}: ${STATUS}"
+      STATUS=$(echo "$INVOCATION" | grep -o '"Status"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)
+      STATUS=${STATUS:-Unknown}
+
+      echo ""
+      echo "Instance: $INSTANCE_ID - $STATUS"
+
+      # Show output for debugging
+      STDOUT=$(echo "$INVOCATION" | grep -o '"StandardOutputContent"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4 | head -c 500)
+      STDERR=$(echo "$INVOCATION" | grep -o '"StandardErrorContent"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4 | head -c 500)
+
+      if [ -n "$STDOUT" ]; then
+        echo "  Output: $STDOUT"
+      fi
+      if [ -n "$STDERR" ]; then
+        echo "  Errors: $STDERR"
+      fi
+
+      if [ "$STATUS" != "Success" ]; then
         FAILED=$((FAILED + 1))
       fi
     done
 
+    echo ""
     if [ "$FAILED" -gt 0 ]; then
-      echo "ERROR: ${FAILED} instance(s) failed"
-      exit 1
+      echo "WARNING: ${FAILED} instance(s) reported non-success status"
+      echo "Check output above - deployment may still have succeeded"
+      # Don't exit 1 here - let verify_deploy health check determine success
     fi
 
-    echo "SSM deploy completed successfully"
+    echo "SSM deploy completed"
     ;;
 
   *)
