@@ -32,19 +32,12 @@ TRIGGER_TYPE=""
 DURATION=""
 
 # Fetch pipeline info from Bitbucket API
-if [ -n "$BITBUCKET_EMAIL" ] && [ -n "$BITBUCKET_API_TOKEN" ] && [ -n "$BITBUCKET_PIPELINE_UUID" ]; then
+if [ -n "$BITBUCKET_EMAIL" ] && [ -n "$BITBUCKET_API_TOKEN" ] && [ -n "$BITBUCKET_BUILD_NUMBER" ]; then
   echo "Fetching pipeline info from Bitbucket API..."
-  # Strip curly braces from UUID if present
-  PIPELINE_UUID_CLEAN=$(echo "$BITBUCKET_PIPELINE_UUID" | tr -d '{}')
   PIPELINE_INFO=$(curl -s -u "${BITBUCKET_EMAIL}:${BITBUCKET_API_TOKEN}" \
-    "https://api.bitbucket.org/2.0/repositories/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pipelines/${PIPELINE_UUID_CLEAN}" 2>/dev/null || echo "{}")
+    "https://api.bitbucket.org/2.0/repositories/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pipelines/${BITBUCKET_BUILD_NUMBER}")
 
   if [ -n "$PIPELINE_INFO" ] && [ "$PIPELINE_INFO" != "{}" ]; then
-    # Debug: print raw API response (remove after debugging)
-    echo "DEBUG: Pipeline API response:"
-    echo "$PIPELINE_INFO" | head -c 2000
-    echo ""
-
     # Extract creator display name
     CREATOR=$(echo "$PIPELINE_INFO" | grep -o '"creator"[[:space:]]*:[[:space:]]*{[^}]*}' | grep -o '"display_name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
     if [ -n "$CREATOR" ]; then
@@ -61,12 +54,21 @@ if [ -n "$BITBUCKET_EMAIL" ] && [ -n "$BITBUCKET_API_TOKEN" ] && [ -n "$BITBUCKE
       COMMIT_MESSAGE=$(echo "$COMMIT_MSG" | head -c 100 | tr '\n' ' ' | sed 's/"/\\"/g')
     fi
 
-    # Extract duration if completed (API returns build_seconds_used)
-    DURATION_SECS=$(echo "$PIPELINE_INFO" | grep -o '"build_seconds_used"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$')
-    if [ -n "$DURATION_SECS" ] && [ "$DURATION_SECS" -gt 0 ]; then
-      MINS=$((DURATION_SECS / 60))
-      SECS=$((DURATION_SECS % 60))
-      DURATION="${MINS}m ${SECS}s"
+    # Extract duration from timestamps (for self-hosted runners)
+    CREATED_ON=$(echo "$PIPELINE_INFO" | grep -o '"created_on"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)
+    COMPLETED_ON=$(echo "$PIPELINE_INFO" | grep -o '"completed_on"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [ -n "$CREATED_ON" ] && [ -n "$COMPLETED_ON" ] && [ "$COMPLETED_ON" != "null" ]; then
+      # Convert to epoch seconds and calculate difference
+      CREATED_EPOCH=$(date -d "$CREATED_ON" +%s 2>/dev/null || echo "")
+      COMPLETED_EPOCH=$(date -d "$COMPLETED_ON" +%s 2>/dev/null || echo "")
+      if [ -n "$CREATED_EPOCH" ] && [ -n "$COMPLETED_EPOCH" ]; then
+        DURATION_SECS=$((COMPLETED_EPOCH - CREATED_EPOCH))
+        if [ "$DURATION_SECS" -gt 0 ]; then
+          MINS=$((DURATION_SECS / 60))
+          SECS=$((DURATION_SECS % 60))
+          DURATION="${MINS}m ${SECS}s"
+        fi
+      fi
     fi
   fi
 fi
