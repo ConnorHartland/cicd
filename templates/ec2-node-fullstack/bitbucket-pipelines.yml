@@ -154,22 +154,18 @@ definitions:
           - aws s3 rm s3://$S3_BUCKET --recursive --exclude "*.env" --quiet
           - aws s3 cp build_${BITBUCKET_COMMIT}.zip s3://$S3_BUCKET/build.zip --quiet
           - ./scripts/deploy_asg.sh ${DEPLOY_METHOD:-refresh}
-
-    - step: &verify-deploy
-        name: Verify Deployment
-        image: amazon/aws-cli
-        script:
+          - ./scripts/verify_deploy.sh
+          - ./scripts/newrelic_deploy.sh
+        after-script:
           - |
             export AWS_ACCESS_KEY_ID=$(eval echo \$AWS_ACCESS_KEY_ID_$AWS_SUFFIX)
             export AWS_SECRET_ACCESS_KEY=$(eval echo \$AWS_SECRET_ACCESS_KEY_$AWS_SUFFIX)
           - |
-            if ./scripts/verify_deploy.sh; then
+            if [ "$BITBUCKET_EXIT_CODE" -eq 0 ]; then
               ./scripts/teams_notify.sh success
             else
               ./scripts/teams_notify.sh failure
-              exit 1
             fi
-          - ./scripts/newrelic_deploy.sh
 
     - step: &build-client
         name: Build Client
@@ -251,7 +247,6 @@ pipelines:
             - step: *build-client
             - step: *predeploy
             - step: *deploy
-            - step: *verify-deploy
       - stage:
           name: Deploy to Staging
           deployment: Staging
@@ -260,7 +255,6 @@ pipelines:
             - step: *build-client
             - step: *predeploy
             - step: *deploy
-            - step: *verify-deploy
       - stage:
           name: Deploy to Production
           deployment: Production
@@ -269,7 +263,6 @@ pipelines:
             - step: *build-client
             - step: *predeploy
             - step: *deploy
-            - step: *verify-deploy
       - step: *merge-pr
 
   # ===================
@@ -303,8 +296,7 @@ pipelines:
             - step: *build-client
             - step: *predeploy
             - step: *deploy
-            - step: *verify-deploy
-
+            
     deploy-to-test:
       - variables:
           - name: SEED
@@ -320,8 +312,7 @@ pipelines:
             - step: *build-client
             - step: *predeploy
             - step: *deploy
-            - step: *verify-deploy
-
+            
     deploy-hotfix:
       - step: *build-release
       - stage:
@@ -331,8 +322,7 @@ pipelines:
             - step: *build-client
             - step: *predeploy
             - step: *deploy
-            - step: *verify-deploy
-
+            
     setup-kafka:
       - variables:
           - name: ENV_SUFFIX

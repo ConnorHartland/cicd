@@ -116,27 +116,29 @@ case $DEPLOY_METHOD in
     echo "=== Instance Results ==="
     FAILED=0
     for INSTANCE_ID in $INSTANCE_IDS; do
+      echo ""
+      echo "--- Instance: $INSTANCE_ID ---"
+
       INVOCATION=$(aws ssm get-command-invocation \
         --region "$AWS_REGION" \
         --command-id "$COMMAND_ID" \
         --instance-id "$INSTANCE_ID" \
         --output json 2>/dev/null || echo "{}")
 
-      STATUS=$(echo "$INVOCATION" | grep -o '"Status"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)
-      STATUS=${STATUS:-Unknown}
+      STATUS=$(echo "$INVOCATION" | jq -r '.Status // "Unknown"')
+      echo "Status: $STATUS"
 
+      # Show output
       echo ""
-      echo "Instance: $INSTANCE_ID - $STATUS"
+      echo "Output:"
+      echo "$INVOCATION" | jq -r '.StandardOutputContent // "No output"' | tail -20
 
-      # Show output for debugging
-      STDOUT=$(echo "$INVOCATION" | grep -o '"StandardOutputContent"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4 | head -c 500)
-      STDERR=$(echo "$INVOCATION" | grep -o '"StandardErrorContent"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4 | head -c 500)
-
-      if [ -n "$STDOUT" ]; then
-        echo "  Output: $STDOUT"
-      fi
+      # Show errors if any
+      STDERR=$(echo "$INVOCATION" | jq -r '.StandardErrorContent // ""')
       if [ -n "$STDERR" ]; then
-        echo "  Errors: $STDERR"
+        echo ""
+        echo "Errors:"
+        echo "$STDERR" | tail -10
       fi
 
       if [ "$STATUS" != "Success" ]; then
